@@ -75,6 +75,9 @@ services:
       target: dev
     container_name: praxarch-api
     restart: unless-stopped
+    # nodemon (legacy polling) detects host edits through the bind mount and
+    # restarts Nest — reliable hot reload on Windows/macOS. See apps/api/nodemon.json.
+    command: ["npm", "run", "start:docker"]
     environment:
       PORT: 3901
       NODE_ENV: development
@@ -114,6 +117,10 @@ services:
       NODE_ENV: development
       # BFF → API over the internal docker network (server-side only).
       API_BASE_URL: http://api:3901
+      # Bind-mount file events don't reach the watcher on Windows/macOS →
+      # poll instead so host edits hot-reload inside the container.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3900:3000"
     volumes:

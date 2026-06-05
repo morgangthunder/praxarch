@@ -1,0 +1,10 @@
+{
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": ["src/**/*.spec.ts"],
+  "//": "legacyWatch + polling: required so host edits are detected through the Docker bind mount on Windows/macOS (fs events don't propagate).",
+  "legacyWatch": true,
+  "pollingInterval": 700,
+  "delay": 400,
+  "exec": "nest start"
+}
