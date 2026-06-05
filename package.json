@@ -1,0 +1,14 @@
+{
+  "name": "praxarch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Praxarch — multi-tenant agentic Online Business Management Platform.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @praxarch/web run dev",
+    "dev:api": "npm --workspace @praxarch/api run start:dev",
+    "typecheck": "npm --workspace @praxarch/web run typecheck && npm --workspace @praxarch/api run typecheck"
+  }
+}

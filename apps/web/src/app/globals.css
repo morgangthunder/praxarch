@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Monochromatic token palette.
+ * Light + dark share the same component classes; only these vars flip.
+ */
+:root {
+  --surface-base: 250 250 250; /* near-white */
+  --surface-raised: 255 255 255;
+  --surface-overlay: 255 255 255;
+
+  --border-subtle: 228 228 231;
+  --border-strong: 212 212 216;
+
+  --content-primary: 24 24 27;
+  --content-secondary: 82 82 91;
+  --content-muted: 161 161 170;
+
+  --font-sans: "Inter", system-ui;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+.dark {
+  --surface-base: 9 9 11; /* zinc-950 */
+  --surface-raised: 24 24 27; /* zinc-900 */
+  --surface-overlay: 39 39 42; /* zinc-800 */
+
+  --border-subtle: 39 39 42;
+  --border-strong: 63 63 70;
+
+  --content-primary: 244 244 245;
+  --content-secondary: 161 161 170;
+  --content-muted: 113 113 122;
+}
+
+* {
+  border-color: rgb(var(--border-subtle));
+}
+
+body {
+  background-color: rgb(var(--surface-base));
+  color: rgb(var(--content-primary));
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars (Linear-style) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--border-strong));
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
