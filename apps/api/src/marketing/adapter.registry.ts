@@ -14,7 +14,7 @@ export class AdapterRegistry {
   private readonly adapters: Map<string, SocialMediaAdapter>;
 
   constructor(unified: UnifiedToAdapter, meta: MetaNativeAdapter) {
-    this.adapters = new Map([
+    this.adapters = new Map<string, SocialMediaAdapter>([
       [unified.key, unified],
       [meta.key, meta],
     ]);

@@ -46,7 +46,22 @@ The Brain never speaks a vendor dialect. The Plumbing never makes a business dec
 | [`docs/02-cicd-deployment.md`](docs/02-cicd-deployment.md) | 2 | One-button Coolify deploy flow |
 | [`docs/03-whatsapp-hitl.md`](docs/03-whatsapp-hitl.md) | 3 | Async pause/resume HITL engine |
 | [`docs/04-marketing-os-adapters.md`](docs/04-marketing-os-adapters.md) | 4 | Adapter pattern for Marketing OS |
+| [`docs/05-docker-and-ports.md`](docs/05-docker-and-ports.md) | — | Docker stack + port allocation (clash-free) |
 | [`docs/adr/`](docs/adr/) | — | Architecture Decision Records |
+
+---
+
+## Quick Start (Docker)
+
+Everything runs from Docker on a dedicated, clash-free port block (see [port map](docs/05-docker-and-ports.md)).
+
+```bash
+cp .env.example .env       # fill secrets
+docker compose build
+docker compose up -d
+# web → http://localhost:3900   api → http://localhost:3901
+# postgres :5440   redis :6390   n8n :5690
+```
 
 ---
 
@@ -66,6 +81,8 @@ praxarch/
 │           ├── cicd/         # Phase 2: Coolify deploy module
 │           ├── whatsapp/     # Phase 3: Twilio HITL engine
 │           └── marketing/    # Phase 4: Marketing OS adapters
+├── infra/postgres/init/      # DB bootstrap (platform catalog)
+├── docker-compose.yml        # Full local stack (clash-free ports)
 └── README.md
 ```
 

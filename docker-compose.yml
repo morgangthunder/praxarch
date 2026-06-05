@@ -1,0 +1,137 @@
+# ── Praxarch — local Docker stack ─────────────────────────────────────
+# Dedicated port block chosen to avoid clashing with Bubblbook / Upora /
+# Bloomix on this machine. See docs/05-docker-and-ports.md for the map.
+#
+#   web      → http://localhost:3900
+#   api      → http://localhost:3901
+#   postgres → localhost:5440
+#   redis    → localhost:6390
+#   n8n      → http://localhost:5690
+#
+# Usage (avoids TTY hangs, per project convention):
+#   docker compose up -d --no-attach postgres --no-attach redis --no-attach n8n
+#   docker compose build
+#   docker compose down
+
+name: praxarch
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: praxarch-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-praxarch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-praxarch}
+      POSTGRES_DB: ${POSTGRES_DB:-praxarch}
+    ports:
+      - "5440:5432"
+    volumes:
+      - praxarch_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-praxarch} -d ${POSTGRES_DB:-praxarch}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [praxarch]
+
+  redis:
+    image: redis:7-alpine
+    container_name: praxarch-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6390:6379"
+    volumes:
+      - praxarch_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [praxarch]
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: praxarch-n8n
+    restart: unless-stopped
+    environment:
+      N8N_PORT: 5678
+      N8N_HOST: localhost
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5690/
+      GENERIC_TIMEZONE: Europe/Dublin
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    ports:
+      - "5690:5678"
+    volumes:
+      - praxarch_n8ndata:/home/node/.n8n
+    networks: [praxarch]
+
+  api:
+    build:
+      context: ./apps/api
+      target: dev
+    container_name: praxarch-api
+    restart: unless-stopped
+    environment:
+      PORT: 3901
+      NODE_ENV: development
+      CORS_ORIGINS: http://localhost:3900
+      DATABASE_URL: postgres://${POSTGRES_USER:-praxarch}:${POSTGRES_PASSWORD:-praxarch}@postgres:5432/${POSTGRES_DB:-praxarch}
+      REDIS_URL: redis://redis:6379
+      N8N_BASE_URL: http://n8n:5678
+      # Phase secrets — override in a real .env (never commit).
+      COOLIFY_API_URL: ${COOLIFY_API_URL:-}
+      COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN:-}
+      COOLIFY_WEBHOOK_SECRET: ${COOLIFY_WEBHOOK_SECRET:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
+      PUBLIC_WEBHOOK_BASE: ${PUBLIC_WEBHOOK_BASE:-http://localhost:3901}
+      UNIFIED_API_URL: ${UNIFIED_API_URL:-https://api.unified.to}
+      UNIFIED_API_KEY: ${UNIFIED_API_KEY:-}
+    ports:
+      - "3901:3901"
+    volumes:
+      - ./apps/api:/app
+      - praxarch_api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [praxarch]
+
+  web:
+    build:
+      context: ./apps/web
+      target: dev
+    container_name: praxarch-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      # BFF → API over the internal docker network (server-side only).
+      API_BASE_URL: http://api:3901
+    ports:
+      - "3900:3000"
+    volumes:
+      - ./apps/web:/app
+      - praxarch_web_node_modules:/app/node_modules
+      - praxarch_web_next:/app/.next
+    depends_on:
+      - api
+    networks: [praxarch]
+
+networks:
+  praxarch:
+    name: praxarch_net
+
+volumes:
+  praxarch_pgdata:
+  praxarch_redisdata:
+  praxarch_n8ndata:
+  praxarch_api_node_modules:
+  praxarch_web_node_modules:
+  praxarch_web_next:

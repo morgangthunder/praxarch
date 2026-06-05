@@ -9,6 +9,10 @@
   "scripts": {
     "dev:web": "npm --workspace @praxarch/web run dev",
     "dev:api": "npm --workspace @praxarch/api run start:dev",
-    "typecheck": "npm --workspace @praxarch/web run typecheck && npm --workspace @praxarch/api run typecheck"
+    "typecheck": "npm --workspace @praxarch/web run typecheck && npm --workspace @praxarch/api run typecheck",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f api web"
   }
 }
