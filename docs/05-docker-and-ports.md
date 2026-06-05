@@ -67,7 +67,9 @@ praxarch-web  | 🟣 Praxarch Web v0.2.0 — API: http://api:3901
 
 ## Notes
 
-- **Dev mode + hot reload:** `web` and `api` use the `dev` Dockerfile target with bind-mounted source. Named volumes hold `node_modules` (and `.next`) so the empty host folders don't shadow the container's installed deps. Edit files on the host → containers reload.
+- **Dev mode + hot reload:** `web` and `api` use the `dev` Dockerfile target with bind-mounted source. Named volumes hold `node_modules` (and `.next`) so the empty host folders don't shadow the container's installed deps. Edit files on the host → containers reload automatically.
+  - On Windows/macOS, bind-mount filesystem events don't reach Linux-container watchers, so **polling** is used: the API runs `nodemon` in legacy-watch mode (`apps/api/nodemon.json`, `command: npm run start:docker`) and the web container sets `WATCHPACK_POLLING=true` / `CHOKIDAR_USEPOLLING=true`. Both were verified to auto-reload on host edits.
+  - After changing `apps/api/package.json` dependencies, rebuild + refresh the deps volume: `docker compose rm -sf api; docker volume rm praxarch_praxarch_api_node_modules; docker compose up -d --build api`.
 - **No lockfile yet:** images run `npm install` (not `npm ci`). Commit the generated `package-lock.json` after the first build for reproducible installs.
 - **Postgres bootstrap:** `infra/postgres/init/001-init.sql` runs once on a fresh volume — creates the `public` platform catalog (tenants, prompt registry, usage rollups). Tenant schemas are created by the API at onboarding.
 - **Production targets:** each Dockerfile also has a `prod` stage (`node dist/main.js` / Next.js standalone) for Coolify deploys.
