@@ -36,7 +36,7 @@ export function TenantTable({ tenants }: { tenants: Tenant[] }) {
                 className="border-b border-border-subtle last:border-0 transition-colors hover:bg-surface-overlay"
               >
                 <td className="px-4 py-2.5">
-                  <Link href={`/clients/${t.slug}`} className="flex items-center gap-2.5">
+                  <Link href={`/app/${t.slug}`} className="flex items-center gap-2.5">
                     <StatusDot status={t.status} />
                     <span className="font-medium text-content-primary">{t.name}</span>
                   </Link>

@@ -47,6 +47,7 @@ The Brain never speaks a vendor dialect. The Plumbing never makes a business dec
 | [`docs/03-whatsapp-hitl.md`](docs/03-whatsapp-hitl.md) | 3 | Async pause/resume HITL engine |
 | [`docs/04-marketing-os-adapters.md`](docs/04-marketing-os-adapters.md) | 4 | Adapter pattern for Marketing OS |
 | [`docs/05-docker-and-ports.md`](docs/05-docker-and-ports.md) | — | Docker stack + port allocation (clash-free) |
+| [`docs/06-modules-and-entitlements.md`](docs/06-modules-and-entitlements.md) | — | Tenant modules, pricing tiers & access gating |
 | [`docs/adr/`](docs/adr/) | — | Architecture Decision Records |
 
 ---

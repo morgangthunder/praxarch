@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
   title: "Praxarch — Agentic Business OS",
@@ -9,11 +8,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   // `dark` class enables the deep dark-mode palette by default (premium B2B feel).
+  // Each surface (super-admin vs tenant app) supplies its own shell via nested layouts.
   return (
     <html lang="en" className="dark">
-      <body>
-        <AppShell>{children}</AppShell>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

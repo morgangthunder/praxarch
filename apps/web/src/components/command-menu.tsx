@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ import { MOCK_TENANTS } from "@/lib/mock-data";
  */
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -26,10 +28,11 @@ export function CommandMenu() {
     return () => document.removeEventListener("keydown", down);
   }, []);
 
-  // Stubbed action handler — wire to BFF (e.g. POST /cicd/deploy) in production.
-  const run = (label: string) => {
+  // Navigate to a route, or fall back to logging stubbed actions.
+  const run = (target: string) => {
     setOpen(false);
-    if (typeof window !== "undefined") console.info(`[command] ${label}`);
+    if (target.startsWith("/")) router.push(target);
+    else if (typeof window !== "undefined") console.info(`[command] ${target}`);
   };
 
   return (
@@ -68,7 +71,7 @@ export function CommandMenu() {
 
               <Group heading="Clients">
                 {MOCK_TENANTS.map((t) => (
-                  <Item key={t.id} onSelect={() => run(`jump:${t.slug}`)}>
+                  <Item key={t.id} onSelect={() => run(`/app/${t.slug}`)}>
                     <span className="text-content-secondary">Open</span> {t.name}
                   </Item>
                 ))}
@@ -82,9 +85,10 @@ export function CommandMenu() {
                 </Item>
               </Group>
 
-              <Group heading="Prompt Registry">
-                <Item onSelect={() => run("prompts:search")}>Search prompts…</Item>
-                <Item onSelect={() => run("prompts:diff")}>View latest prompt diffs</Item>
+              <Group heading="Admin">
+                <Item onSelect={() => run("/tenants")}>Manage tenants &amp; access</Item>
+                <Item onSelect={() => run("/flows")}>Open Flow Studio</Item>
+                <Item onSelect={() => run("/prompts")}>Edit prompt registry</Item>
               </Group>
             </Command.List>
           </Command>

@@ -3,6 +3,8 @@
  * These mirror the API contracts exposed by the NestJS BFF.
  */
 
+import type { TenantEntitlements } from "./modules";
+
 export type AutonomyLevel = "FULLY_AUTONOMOUS" | "APPROVAL_REQUIRED" | "PAUSED";
 
 export type AgentStatus = "active" | "pending" | "error" | "idle" | "info";
@@ -31,6 +33,8 @@ export interface Tenant {
   monthlySpendEur: number;
   /** Live margin = revenue charged − provider cost. */
   marginPct: number;
+  /** Subscription tier + per-module access overrides. */
+  entitlements: TenantEntitlements;
 }
 
 export interface CreditWindow {
@@ -52,4 +56,62 @@ export interface HitlCheckpoint {
   summary: string;
   kind: "content_publish" | "budget_change" | "alert";
   createdAt: string;
+}
+
+// ── Customer Acquisition module ───────────────────────────────────────
+export interface Campaign {
+  id: string;
+  name: string;
+  channel: "meta" | "google" | "tiktok" | "linkedin" | "email";
+  status: AgentStatus;
+  spendEur: number;
+  /** Cost per acquisition. */
+  cpaEur: number;
+  conversions: number;
+}
+
+// ── Deployments module ────────────────────────────────────────────────
+export interface Deployment {
+  id: string;
+  environment: "production" | "staging";
+  branch: string;
+  commit: string;
+  status: AgentStatus;
+  deployedAt: string;
+  actor: string;
+}
+
+// ── Finances module ───────────────────────────────────────────────────
+export interface FilingObligation {
+  id: string;
+  name: string;
+  authority: string;
+  dueDate: string;
+  status: "upcoming" | "due_soon" | "overdue" | "filed";
+}
+
+export interface FinanceSnapshot {
+  cashEur: number;
+  mrrEur: number;
+  burnEur: number;
+  runwayMonths: number;
+}
+
+// ── Automations module ────────────────────────────────────────────────
+export interface Automation {
+  id: string;
+  name: string;
+  trigger: string;
+  status: AgentStatus;
+  /** Linked n8n workflow id. */
+  workflowId: string;
+  runsToday: number;
+}
+
+// ── Account / integrations ────────────────────────────────────────────
+export interface Integration {
+  id: string;
+  name: string;
+  category: "messaging" | "ads" | "accounting" | "deploy";
+  connected: boolean;
 }

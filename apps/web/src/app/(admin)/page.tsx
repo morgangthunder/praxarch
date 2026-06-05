@@ -17,6 +17,7 @@ import { formatCurrency } from "@/lib/utils";
 /**
  * Super-Admin Control Center.
  * Global observability across all tenants + the high-level strategist engine.
+ * This view is platform-operator only — never exposed to tenants.
  */
 export default function ControlCenterPage() {
   const totalSpend = MOCK_TENANTS.reduce((s, t) => s + t.monthlySpendEur, 0);
@@ -30,7 +31,6 @@ export default function ControlCenterPage() {
         actions={<DeployButton environment="production" />}
       />
 
-      {/* Top-line platform stats */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Tenants" value={String(MOCK_TENANTS.length)} status="active" />
         <Stat label="Active agents" value={String(activeAgents)} status="active" />
