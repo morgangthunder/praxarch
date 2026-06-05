@@ -38,8 +38,11 @@ export default function TenantsAdminPage() {
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-content-muted">{plan.tagline}</p>
+                  <p className="mt-2 font-mono text-[11px] text-content-muted">
+                    {plan.includedCreditsMonthly.toLocaleString()} credits/mo
+                  </p>
                   <ul className="mt-3 space-y-1">
-                    {MODULES.map((m) => {
+                    {MODULES.filter((m) => !m.alwaysOn).map((m) => {
                       const included = tierIncludes(tier, m.key);
                       return (
                         <li
@@ -47,13 +50,18 @@ export default function TenantsAdminPage() {
                           className={
                             included
                               ? "flex items-center gap-2 text-xs text-content-secondary"
-                              : "flex items-center gap-2 text-xs text-content-muted/50 line-through"
+                              : "flex items-center gap-2 text-xs text-content-muted"
                           }
                         >
-                          <span className={included ? "text-status-active" : "text-content-muted"}>
-                            {included ? "✓" : "—"}
+                          <span className={included ? "text-status-active" : "text-content-muted/60"}>
+                            {included ? "✓" : "+"}
                           </span>
-                          {m.label}
+                          <span className={included ? "" : "text-content-muted/70"}>{m.label}</span>
+                          {!included && m.addOnPriceEurMonthly && (
+                            <span className="ml-auto font-mono text-[10px] text-content-muted/70">
+                              {formatCurrency(m.addOnPriceEurMonthly)}/mo
+                            </span>
+                          )}
                         </li>
                       );
                     })}

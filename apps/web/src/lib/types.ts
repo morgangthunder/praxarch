@@ -3,7 +3,7 @@
  * These mirror the API contracts exposed by the NestJS BFF.
  */
 
-import type { TenantEntitlements } from "./modules";
+import type { ModuleKey, TenantEntitlements } from "./modules";
 
 export type AutonomyLevel = "FULLY_AUTONOMOUS" | "APPROVAL_REQUIRED" | "PAUSED";
 
@@ -114,4 +114,26 @@ export interface Integration {
   name: string;
   category: "messaging" | "ads" | "accounting" | "deploy";
   connected: boolean;
+}
+
+// ── Credits: tier allowance + top-ups (tenant-facing view) ────────────
+export interface CreditAllowance {
+  period: string;
+  /** Credits included by the tenant's plan tier this window. */
+  includedAllowance: number;
+  /** Credits consumed this window. */
+  used: number;
+  /** Remaining purchased top-up credits (roll-over). */
+  topUpRemaining: number;
+}
+
+// ── Overview: cross-module pending actions ────────────────────────────
+export interface PendingAction {
+  id: string;
+  kind: "approval" | "filing" | "deploy" | "credit";
+  label: string;
+  detail: string;
+  /** Module this action routes to. */
+  module: ModuleKey;
+  severity: AgentStatus;
 }

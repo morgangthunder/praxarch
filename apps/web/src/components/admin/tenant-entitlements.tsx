@@ -6,9 +6,12 @@ import { Toggle } from "@/components/ui/toggle";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   MODULES,
+  MODULE_BY_KEY,
   PLANS,
   TIER_ORDER,
+  addOnMonthlyTotal,
   hasModuleAccess,
+  isAddOn,
   tierIncludes,
   type ModuleKey,
   type PlanTier,
@@ -60,7 +63,8 @@ export function TenantEntitlementsManager({ tenants }: { tenants: Tenant[] }) {
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-content-muted">
-                  {formatCurrency(plan.priceEurMonthly)}/mo
+                  {formatCurrency(plan.priceEurMonthly)}
+                  {addOnMonthlyTotal(ent) > 0 ? ` + ${formatCurrency(addOnMonthlyTotal(ent))}` : ""}/mo
                 </span>
                 <select
                   value={ent.tier}
@@ -79,7 +83,8 @@ export function TenantEntitlementsManager({ tenants }: { tenants: Tenant[] }) {
               {MODULES.map((m) => {
                 const allowed = hasModuleAccess(ent, m.key);
                 const tierDefault = tierIncludes(ent.tier, m.key);
-                const isOverride = allowed !== tierDefault;
+                const addon = isAddOn(ent, m.key);
+                const forcedOff = !allowed && tierDefault; // override-disabled below tier
                 const Icon = m.icon;
                 return (
                   <div
@@ -91,16 +96,25 @@ export function TenantEntitlementsManager({ tenants }: { tenants: Tenant[] }) {
                       <div className="min-w-0">
                         <div className="truncate text-sm text-content-primary">{m.label}</div>
                         <div className="text-[10px] uppercase tracking-wide text-content-muted">
-                          {isOverride ? (
-                            <span className="text-status-info">override</span>
+                          {m.alwaysOn ? (
+                            <span className="text-content-muted">always on</span>
+                          ) : addon ? (
+                            <span className="text-status-info">
+                              add-on +{formatCurrency(m.addOnPriceEurMonthly ?? 0)}/mo
+                            </span>
+                          ) : forcedOff ? (
+                            <span className="text-status-error">suspended</span>
+                          ) : tierDefault ? (
+                            <span className="text-status-active">included</span>
                           ) : (
-                            <>requires {PLANS[m.minTier].name}</>
+                            <>requires {PLANS[MODULE_BY_KEY[m.key].minTier].name}</>
                           )}
                         </div>
                       </div>
                     </div>
                     <Toggle
                       checked={allowed}
+                      disabled={m.alwaysOn}
                       onChange={(next) => toggleModule(t.id, m.key, next)}
                       aria-label={`${m.label} access`}
                     />

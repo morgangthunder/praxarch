@@ -2,10 +2,17 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CreditMeter } from "@/components/credit-meter";
+import { AllowancePanel } from "@/components/account/allowance-panel";
+import { AddOnsPanel } from "@/components/account/addons-panel";
 import { IntegrationsPanel } from "@/components/account/integrations-panel";
-import { getTenant, MOCK_CREDITS } from "@/lib/mock-data";
-import { PLANS, TIER_ORDER, MODULES, tierIncludes } from "@/lib/modules";
+import { getTenant, MOCK_CREDITS, MOCK_CREDITS_USED, MOCK_TOPUP_REMAINING } from "@/lib/mock-data";
+import {
+  PLANS,
+  TIER_ORDER,
+  MODULES,
+  addOnMonthlyTotal,
+  tierIncludes,
+} from "@/lib/modules";
 import { formatCurrency } from "@/lib/utils";
 
 const LLM_SPEND = [
@@ -25,12 +32,13 @@ export default async function AccountPage({
 
   const currentTier = tenant.entitlements.tier;
   const currentPlan = PLANS[currentTier];
+  const addOns = addOnMonthlyTotal(tenant.entitlements);
 
   return (
     <>
       <PageHeader
         title="Account"
-        subtitle="Plan, credit usage, LLM spend, and integrations."
+        subtitle="Plan, add-ons, credit allowance, LLM spend, and integrations."
       />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -40,7 +48,8 @@ export default async function AccountPage({
             <CardHeader>
               <CardTitle>Subscription</CardTitle>
               <span className="text-xs text-content-muted">
-                Current: {currentPlan.name} · {formatCurrency(currentPlan.priceEurMonthly)}/mo
+                {currentPlan.name} {formatCurrency(currentPlan.priceEurMonthly)}
+                {addOns > 0 ? ` + ${formatCurrency(addOns)} add-ons` : ""}/mo
               </span>
             </CardHeader>
             <CardBody className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -62,8 +71,11 @@ export default async function AccountPage({
                         {formatCurrency(plan.priceEurMonthly)}
                       </span>
                     </div>
+                    <div className="mt-0.5 text-[11px] text-content-muted">
+                      {plan.includedCreditsMonthly.toLocaleString()} credits/mo
+                    </div>
                     <ul className="mt-2 space-y-0.5">
-                      {MODULES.filter((m) => tierIncludes(tier, m.key)).map((m) => (
+                      {MODULES.filter((m) => !m.alwaysOn && tierIncludes(tier, m.key)).map((m) => (
                         <li key={m.key} className="text-[11px] text-content-muted">
                           {m.label}
                         </li>
@@ -82,6 +94,8 @@ export default async function AccountPage({
               })}
             </CardBody>
           </Card>
+
+          <AddOnsPanel entitlements={tenant.entitlements} />
 
           {/* LLM spend breakdown */}
           <Card>
@@ -108,7 +122,12 @@ export default async function AccountPage({
         </div>
 
         <div className="space-y-5">
-          <CreditMeter data={MOCK_CREDITS} />
+          <AllowancePanel
+            includedAllowance={currentPlan.includedCreditsMonthly}
+            used={MOCK_CREDITS_USED}
+            topUpRemaining={MOCK_TOPUP_REMAINING}
+            period={MOCK_CREDITS.period}
+          />
           <IntegrationsPanel />
         </div>
       </div>

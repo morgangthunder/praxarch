@@ -26,28 +26,54 @@ white-labeled workspace with the modules they're entitled to.
 
 Each module is an independently-toggleable surface with its own left-nav entry and route.
 
-| Module | Route | Purpose |
-|---|---|---|
-| **Customer Acquisition** | `/app/[t]/acquisition` | AI marketing, ad management, content creation, campaign metrics. |
-| **Automations** | `/app/[t]/automations` | "Your Agents" + n8n-driven workflows + autonomy control. |
-| **Deployments** | `/app/[t]/deployments` | Promote to prod, pick source branch, configure CI/CD (Coolify). |
-| **Finances** | `/app/[t]/finances` | Accounting integration, country-specific filing guidance, analysis. |
-| **Account** | `/app/[t]/account` | Plan & upgrades, credits, LLM spend, integrations (WhatsApp, etc.). |
+| Module | Route | Always-on | Purpose |
+|---|---|---|---|
+| **Overview** | `/app/[t]/overview` | ✓ | Workspace home: cross-module metrics + pending-actions feed. |
+| **Customer Acquisition** | `/app/[t]/acquisition` | | AI marketing, ad management, content creation, campaign metrics. |
+| **Automations** | `/app/[t]/automations` | | "Your Agents" + n8n-driven workflows + autonomy control. |
+| **Deployments** | `/app/[t]/deployments` | | Promote to prod, pick source branch, configure CI/CD (Coolify). |
+| **Finances** | `/app/[t]/finances` | | Accounting integration, country-specific filing guidance, analysis. |
+| **Account** | `/app/[t]/account` | ✓ | Plan & upgrades, add-ons, credit allowance + top-ups, LLM spend, integrations. |
 
-Source of truth: `MODULES` in `apps/web/src/lib/modules.ts`.
+Source of truth: `MODULES` in `apps/web/src/lib/modules.ts`. The tenant index
+(`/app/[t]`) redirects to **Overview**.
+
+### Overview (workspace home)
+- **Metric tiles** are entitlement-filtered — a tile only renders if the tenant has that
+  module (e.g. Runway shows only with Finances), so locked modules never leak data.
+- **"Needs your attention"** aggregates across modules: HITL approvals, overdue filings,
+  failed deploys, and credit warnings — each row links straight to the owning module.
+  Built by `getPendingActions(tenant)`.
 
 ---
 
-## 3. Pricing tiers
+## 3. Pricing tiers + à la carte + credit allowance
 
-| Tier | €/mo | Unlocks (by default) |
-|---|---|---|
-| **Starter** | 149 | Customer Acquisition, Account |
-| **Growth** | 399 | + Automations, Deployments |
-| **Scale** | 899 | + Finances |
+| Tier | €/mo | Credits/mo | Unlocks (by default) |
+|---|---|---|---|
+| **Starter** | 149 | 20,000 | Acquisition (+ Overview, Account always-on) |
+| **Growth** | 399 | 75,000 | + Automations, Deployments |
+| **Scale** | 899 | 200,000 | + Finances |
 
 Each module declares a `minTier`; a tier includes every module whose `minTier` is at
-or below it. (e.g. **Finances requires Scale** — exactly the "higher sub" requirement.)
+or below it. (e.g. **Finances requires Scale** — the "higher sub" requirement.)
+
+**À la carte add-ons.** Any module above the tenant's tier can be enabled individually for
+a monthly fee instead of upgrading the whole plan:
+
+| Add-on | €/mo |
+|---|---|
+| Automations | 99 |
+| Deployments | 79 |
+| Finances | 199 |
+
+An add-on is modelled as a **paid `override = true`** above the tier. `isAddOn(ent, key)`
+distinguishes a paid add-on from a tier-included module; `addOnMonthlyTotal(ent)` sums them.
+
+**Credit allowance + top-ups.** Each tier includes a monthly action-credit allowance
+(`PLANS[tier].includedCreditsMonthly`). When it runs low, tenants buy **top-up packs**
+(`TOPUP_PACKS`: 10k/€49, 50k/€199, 200k/€699) that stack on top of the allowance. Surfaced
+in Account via `AllowancePanel` (included vs used vs remaining + top-up purchase).
 
 ---
 
@@ -66,14 +92,15 @@ hasModuleAccess(ent, module) =
   ent.overrides[module] ?? tierIncludes(ent.tier, module)
 ```
 
-- **Override = true** → force-enable a module above the tenant's tier (e.g. a goodwill
-  trial of Finances on a Growth plan).
-- **Override = false** → force-disable a module the tier would normally include (e.g.
-  suspend Deployments during an incident).
+- **Override = true** → force-enable a module above the tenant's tier. If it's above the
+  tier, it's a **paid à la carte add-on** (`isAddOn` = true).
+- **Override = false** → force-disable a module the tier would normally include (shows as
+  **suspended** in admin; e.g. during an incident or non-payment).
 - **No override** → the tier default applies.
+- **Always-on** modules (Overview, Account) ignore overrides entirely — always accessible.
 
 This gives the super-admin a single screen (`/tenants`) to flip any module on/off per
-tenant, independent of plan, while keeping pricing coherent.
+tenant (with add-on pricing shown inline), independent of plan, while keeping pricing coherent.
 
 ---
 
@@ -110,10 +137,38 @@ tenant, independent of plan, while keeping pricing coherent.
 
 ---
 
-## 8. Open questions (for iteration)
+## 8. Decisions locked (2026-06-05)
 
-- Should non-entitled modules be **hidden entirely** for some tenants vs. shown-locked as
-  an upsell? (Currently shown-locked to surface the upgrade path.)
-- Per-**seat** vs per-**workspace** pricing, and where usage/credits fit alongside tiers.
-- Add-on modules priced individually (à la carte) on top of a base tier?
-- Should Automations be the tenant "home", or a lightweight cross-module overview?
+1. **Locked modules are shown-locked** (upsell), not hidden. ✓
+2. **À la carte** add-ons on top of a base tier. ✓
+3. **Overview** is the dedicated tenant home (cross-module metrics + pending actions). ✓
+4. **Included credit allowance per tier + top-up packs.** ✓
+
+## 9. Open questions (next round)
+
+**Pricing / packaging**
+- Are the placeholder prices (tiers €149/399/899; add-ons €99/79/199; top-ups) in the right
+  ballpark, or should I model them off a target gross margin on credit cost?
+- Do add-ons bring **extra included credits**, or only unlock the module (credits stay at
+  tier allowance)? Right now they only unlock the module.
+- Should there be an **annual** billing option (e.g. 2 months free) in the UI?
+- Per-**seat** pricing at all, or strictly per-**workspace**? (Affects the Account view.)
+
+**Credits**
+- One unified "credit", or separate meters (LLM tokens vs ad spend vs API calls)? Currently
+  one credit pool + a separate LLM-spend breakdown.
+- What happens at **0 credits** — hard stop, auto-top-up, or grace + overage billing?
+- Do top-ups **roll over** between months? (Currently modelled as rolling `topUpRemaining`.)
+
+**Overview**
+- Which **metrics** matter most on the home tiles (I picked spend, automations, last deploy,
+  runway, credits)? Anything to add/remove?
+- Should pending actions be **actionable inline** (approve/retry from the row) or always
+  deep-link into the module? (Currently deep-link.)
+
+**Modules**
+- Is **Account** the right home for add-ons + billing, or should there be a separate
+  **Billing** module/section?
+- Any **6th module** on the horizon (e.g. Support/Inbox, Analytics, CRM) I should leave a
+  slot for?
+- For **white-label**, should the tenant ever see "Praxarch" branding, or fully their own?

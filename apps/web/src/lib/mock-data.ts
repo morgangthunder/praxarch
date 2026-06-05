@@ -8,8 +8,10 @@ import type {
   FinanceSnapshot,
   HitlCheckpoint,
   Integration,
+  PendingAction,
   Tenant,
 } from "./types";
+import { hasModuleAccess } from "./modules";
 
 /**
  * Static fixtures used by the scaffolded UI.
@@ -147,3 +149,71 @@ export const MOCK_INTEGRATIONS: Integration[] = [
   { id: "in_xero", name: "Xero", category: "accounting", connected: false },
   { id: "in_coolify", name: "Coolify", category: "deploy", connected: true },
 ];
+
+// ── Credits allowance (tenant-facing) ─────────────────────────────────
+/** Credits consumed this window (demo). Compared against the tier allowance. */
+export const MOCK_CREDITS_USED = 12_480;
+export const MOCK_TOPUP_REMAINING = 5_000;
+
+/**
+ * Cross-module "needs your attention" feed for the Overview.
+ * Only surfaces actions for modules the tenant is actually entitled to.
+ */
+export function getPendingActions(tenant: Tenant): PendingAction[] {
+  const ent = tenant.entitlements;
+  const actions: PendingAction[] = [];
+
+  // Approvals (HITL) — only when the tenant runs in approval mode.
+  if (tenant.autonomy === "APPROVAL_REQUIRED" && hasModuleAccess(ent, "acquisition")) {
+    actions.push({
+      id: "pa_approval",
+      kind: "approval",
+      label: "Content awaiting approval",
+      detail: "3 Instagram posts drafted by the Creative agent.",
+      module: "acquisition",
+      severity: "pending",
+    });
+  }
+
+  // Overdue filing — only if Finances is entitled.
+  if (hasModuleAccess(ent, "finances")) {
+    const overdue = MOCK_FILINGS.find((f) => f.status === "overdue");
+    if (overdue) {
+      actions.push({
+        id: "pa_filing",
+        kind: "filing",
+        label: `${overdue.name} overdue`,
+        detail: `${overdue.authority} · was due ${overdue.dueDate}.`,
+        module: "finances",
+        severity: "error",
+      });
+    }
+  }
+
+  // Failed deployment — only if Deployments is entitled.
+  if (hasModuleAccess(ent, "deployments")) {
+    const failed = MOCK_DEPLOYMENTS.find((d) => d.status === "error");
+    if (failed) {
+      actions.push({
+        id: "pa_deploy",
+        kind: "deploy",
+        label: "Production deploy failed",
+        detail: `${failed.branch}@${failed.commit} — needs a re-run.`,
+        module: "deployments",
+        severity: "error",
+      });
+    }
+  }
+
+  // Low credit warning (always relevant; Account is always-on).
+  actions.push({
+    id: "pa_credit",
+    kind: "credit",
+    label: "Credit allowance 62% used",
+    detail: "At current pace you'll exhaust the monthly allowance in ~9 days.",
+    module: "account",
+    severity: "info",
+  });
+
+  return actions;
+}
