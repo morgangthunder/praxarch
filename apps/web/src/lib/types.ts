@@ -59,6 +59,90 @@ export interface HitlCheckpoint {
 }
 
 // ── Customer Acquisition module ───────────────────────────────────────
+/** An AI-generated content item moving through the publish pipeline. */
+export interface ContentDraft {
+  id: string;
+  channel: "meta" | "google" | "tiktok" | "linkedin" | "email";
+  title: string;
+  body: string;
+  /** draft → awaiting (HITL) → scheduled/published, or rejected. */
+  status: "draft" | "awaiting" | "scheduled" | "published" | "rejected";
+  createdAt: string;
+}
+
+export interface FunnelStage {
+  label: string;
+  count: number;
+}
+
+/**
+ * Pre-CRM marketing lead (Customer Acquisition funnel).
+ * Once identified, syncs to a CrmContact — attribution rides along for closed-loop reporting.
+ */
+export interface Lead {
+  id: string;
+  name: string;
+  source: Campaign["channel"];
+  valueEur: number;
+  status: "new" | "qualified" | "won" | "lost";
+  /** Populated after the lead is promoted to a CRM contact. */
+  contactId?: string;
+}
+
+// ── CRM module (Contacts + Pipeline) ────────────────────────────────────
+/** How a contact entered the tenant's CRM. `ad:*` = synced from Acquisition. */
+export type CrmContactSource =
+  | "ad:meta"
+  | "ad:google"
+  | "ad:tiktok"
+  | "ad:linkedin"
+  | "ad:email"
+  | "manual"
+  | "import";
+
+/** First-touch attribution captured by the Praxarch SDK / ad click IDs (CA §9.1). */
+export interface CrmAttribution {
+  gclid?: string;
+  fbclid?: string;
+  utmSource?: string;
+  utmCampaign?: string;
+  firstTouchAt?: string;
+}
+
+export interface CrmContact {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  company?: string;
+  tags: string[];
+  customFields: Record<string, string>;
+  source: CrmContactSource;
+  attribution?: CrmAttribution;
+  /** Links back to the Acquisition lead that created this contact. */
+  leadId?: string;
+  createdAt: string;
+}
+
+export type CrmOpportunityStage = "new" | "qualified" | "proposal" | "won" | "lost";
+
+export interface CrmOpportunity {
+  id: string;
+  contactId: string;
+  title: string;
+  dealValueCents: number;
+  currency: string;
+  stage: CrmOpportunityStage;
+  expectedCloseDate?: string;
+  stageChangedAt: string;
+  notes?: string;
+}
+
+export interface CrmPipelineStage {
+  id: CrmOpportunityStage;
+  label: string;
+}
+
 export interface Campaign {
   id: string;
   name: string;
@@ -79,6 +163,29 @@ export interface Deployment {
   status: AgentStatus;
   deployedAt: string;
   actor: string;
+}
+
+export type DeployEnvironment = "production" | "staging";
+
+/** The state of one environment of a deployable service. */
+export interface ServiceEnvironment {
+  environment: DeployEnvironment;
+  branch: string;
+  commit: string;
+  version: string;
+  status: AgentStatus;
+  deployedAt: string;
+  /** Set when staging is ahead of production (a promote is available). */
+  aheadOfProd?: boolean;
+}
+
+/** A deployable unit within a tenant — an app or a backing service. */
+export interface DeployService {
+  id: string;
+  name: string;
+  repo: string;
+  kind: "app" | "service";
+  environments: ServiceEnvironment[];
 }
 
 // ── Finances module ───────────────────────────────────────────────────
@@ -106,6 +213,38 @@ export interface Automation {
   /** Linked n8n workflow id. */
   workflowId: string;
   runsToday: number;
+}
+
+// ── Account: ad budget, team, spend ───────────────────────────────────
+/** Prepaid ad-budget pool. We fund platforms from the pool and mark up. */
+export interface AdBudget {
+  /** Available pool balance (already topped up) in EUR. */
+  poolEur: number;
+  /** Spent from the pool this window. */
+  spentEur: number;
+  /** Platform-fee markup applied to spend (our margin). */
+  markupPct: number;
+  period: string;
+}
+
+export interface AdChannelSpend {
+  channel: Campaign["channel"];
+  spendEur: number;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "member" | "viewer";
+  status: "active" | "invited";
+}
+
+/** LLM spend attributed to a module (per the round-2 decision: group by module). */
+export interface ModuleSpend {
+  label: string;
+  eur: number;
+  pct: number;
 }
 
 // ── Account / integrations ────────────────────────────────────────────

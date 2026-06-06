@@ -13,8 +13,14 @@ Everything in Praxarch runs from Docker. Ports are deliberately chosen to **not 
 | PostgreSQL | **5440** | 5432 | `postgres://praxarch:praxarch@localhost:5440/praxarch` |
 | Redis | **6390** | 6379 | `redis://localhost:6390` |
 | n8n | **5690** | 5678 | http://localhost:5690 |
+| Coolify *(dedicated WSL2 distro `Ubuntu-24.04`)* | **8000** | 8000 | http://localhost:8000 |
 
 Internally (on the `praxarch_net` network) services talk by name: `api → postgres:5432 / redis:6379 / n8n:5678`, and the web BFF reaches `api:3901`.
+
+**Coolify (Gate 1.5a) runs outside the compose stack** in its own WSL2 distro with its own
+`dockerd` + systemd (so it never conflicts with Docker Desktop). The Praxarch **API container**
+reaches it at **`http://host.docker.internal:8000`** (the `api` service has
+`extra_hosts: host.docker.internal:host-gateway`). Coolify's status webhook calls back to the API.
 
 ---
 

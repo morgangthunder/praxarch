@@ -1,0 +1,281 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Boxes, AppWindow, MessageCircle, Settings2 } from "lucide-react";
+import { Card, CardBody } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
+import { useWorkspace } from "@/components/workspace-context";
+import { useDeployStream, type DeployRunStatus } from "@/lib/use-deploy-stream";
+import type { AgentStatus, DeployEnvironment, DeployService, ServiceEnvironment } from "@/lib/types";
+
+type ActionState = { kind: "idle" | "busy" | "done" | "error" | "requested"; msg?: string };
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function runStatusToAgent(status: DeployRunStatus): AgentStatus {
+  if (status === "success") return "active";
+  if (status === "failed") return "error";
+  return "pending";
+}
+
+/**
+ * One deployable service with live deploy status streaming (Gate 1.1).
+ */
+export function ServiceCard({
+  service,
+  tenantSlug,
+  onConfigure,
+  onServiceUpdate,
+}: {
+  service: DeployService;
+  tenantSlug: string;
+  onConfigure?: () => void;
+  onServiceUpdate?: (updated: DeployService) => void;
+}) {
+  const { can } = useWorkspace();
+  const [state, setState] = useState<ActionState>({ kind: "idle" });
+  const [deploymentId, setDeploymentId] = useState<string | null>(null);
+  const [activeEnv, setActiveEnv] = useState<DeployEnvironment | null>(null);
+  const [localService, setLocalService] = useState(service);
+
+  const { run, label, done } = useDeployStream(deploymentId, tenantSlug);
+  const finalizedRunId = useRef<string | null>(null);
+
+  useEffect(() => {
+    setLocalService(service);
+  }, [service]);
+
+  const prod = localService.environments.find((e) => e.environment === "production");
+  const staging = localService.environments.find((e) => e.environment === "staging");
+  const promoteAvailable = Boolean(staging?.aheadOfProd);
+
+  const displayEnvironments = useMemo(() => {
+    if (!run || !activeEnv) return localService.environments;
+    return localService.environments.map((e) => {
+      if (e.environment !== activeEnv) return e;
+      const agent = runStatusToAgent(run.status);
+      return {
+        ...e,
+        status: agent,
+        version: run.status === "success" ? (run.tag.startsWith("v") ? run.tag : `v${run.tag}`) : e.version,
+        commit: run.commitSha?.slice(0, 7) ?? e.commit,
+        deployedAt: run.status === "success" ? new Date().toISOString() : e.deployedAt,
+      };
+    });
+  }, [localService.environments, run, activeEnv]);
+
+  useEffect(() => {
+    if (!run || !done || !activeEnv) return;
+    if (finalizedRunId.current === run.id) return;
+    finalizedRunId.current = run.id;
+
+    setLocalService((prev) => {
+      const updatedEnvs = prev.environments.map((e) => {
+        if (e.environment !== activeEnv) {
+          if (run.status === "success" && activeEnv === "production" && e.environment === "staging") {
+            return { ...e, aheadOfProd: false };
+          }
+          return e;
+        }
+        if (run.status === "success") {
+          return {
+            ...e,
+            status: "active" as AgentStatus,
+            version: run.tag.startsWith("v") ? run.tag : `v${run.tag}`,
+            commit: run.commitSha?.slice(0, 7) ?? e.commit,
+            deployedAt: new Date().toISOString(),
+            aheadOfProd: activeEnv === "staging" ? true : undefined,
+          };
+        }
+        if (run.status === "failed") {
+          return { ...e, status: "error" as AgentStatus };
+        }
+        return e;
+      });
+      const updated = { ...prev, environments: updatedEnvs };
+      onServiceUpdate?.(updated);
+      return updated;
+    });
+
+    if (run.status === "success") {
+      setState({ kind: "done", msg: `Deployed · ${run.id}` });
+    } else if (run.status === "failed") {
+      setState({ kind: "error", msg: run.errorMessage ?? "Deploy failed" });
+    }
+    setDeploymentId(null);
+    setActiveEnv(null);
+  }, [done, run, activeEnv, onServiceUpdate]);
+
+  async function deploy(environment: DeployEnvironment) {
+    setState({ kind: "busy", msg: environment === "production" ? "Promoting…" : "Deploying…" });
+    setActiveEnv(environment);
+    try {
+      const res = await fetch("/api/bff/cicd/deploy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-praxarch-tenant": tenantSlug,
+        },
+        body: JSON.stringify({
+          project: `${tenantSlug}-${localService.id}`,
+          environment,
+          serviceId: localService.id,
+        }),
+      });
+      if (!res.ok) throw new Error(`Rejected (${res.status})`);
+      const data = (await res.json()) as { deploymentId: string };
+      setDeploymentId(data.deploymentId);
+      setState({ kind: "busy", msg: "Queued…" });
+    } catch (err) {
+      setActiveEnv(null);
+      setState({ kind: "error", msg: err instanceof Error ? err.message : "Failed" });
+    }
+  }
+
+  async function requestApproval() {
+    setState({ kind: "busy", msg: "Requesting approval…" });
+    try {
+      const res = await fetch("/api/bff/cicd/promote-request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-praxarch-tenant": tenantSlug,
+        },
+        body: JSON.stringify({
+          project: `${tenantSlug}-${localService.id}`,
+          environment: "production",
+          serviceId: localService.id,
+          summary: `Promote ${localService.name} to production`,
+        }),
+      });
+      if (!res.ok) throw new Error(`Request rejected (${res.status})`);
+      await res.json().catch(() => ({}));
+      setState({ kind: "requested", msg: "Approval requested via WhatsApp" });
+    } catch (err) {
+      setState({ kind: "error", msg: err instanceof Error ? err.message : "Request failed" });
+    }
+  }
+
+  const Icon = localService.kind === "app" ? AppWindow : Boxes;
+  const prodRow = displayEnvironments.find((e) => e.environment === "production");
+  const stagingRow = displayEnvironments.find((e) => e.environment === "staging");
+
+  return (
+    <Card>
+      <CardBody className="space-y-3">
+        <div className="flex items-center gap-2.5">
+          <Icon className="h-4 w-4 text-content-muted" />
+          <span className="font-medium text-content-primary">{localService.name}</span>
+          <span className="rounded border border-border-subtle bg-surface-base px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-content-muted">
+            {localService.kind}
+          </span>
+          <span className="ml-auto font-mono text-[11px] text-content-muted">{localService.repo}</span>
+          {onConfigure && (
+            <button
+              onClick={onConfigure}
+              title="Configure CI/CD for this service"
+              className="rounded-md p-1 text-content-muted transition-colors hover:bg-surface-base hover:text-content-secondary"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          {prodRow && <EnvRow env={prodRow} />}
+          {stagingRow && <EnvRow env={stagingRow} />}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
+          {can("deploy") && staging && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => deploy("staging")}
+              disabled={state.kind === "busy"}
+            >
+              Deploy staging
+            </Button>
+          )}
+
+          {promoteAvailable ? (
+            can("promote_prod") ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => deploy("production")}
+                disabled={state.kind === "busy"}
+              >
+                Promote → production
+              </Button>
+            ) : can("deploy") ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={requestApproval}
+                disabled={state.kind === "requested"}
+              >
+                <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                Request prod via WhatsApp
+              </Button>
+            ) : null
+          ) : (
+            <span className="text-xs text-content-muted">Production is up to date.</span>
+          )}
+
+          {state.kind !== "idle" && (
+            <span className="ml-auto flex items-center gap-1.5 text-xs text-content-muted">
+              <StatusDot
+                status={
+                  run
+                    ? runStatusToAgent(run.status)
+                    : state.kind === "done"
+                      ? "active"
+                      : state.kind === "error"
+                        ? "error"
+                        : state.kind === "requested"
+                          ? "pending"
+                          : "info"
+                }
+              />
+              {run ? label : state.msg}
+            </span>
+          )}
+
+          {!can("deploy") && (
+            <span className="text-xs text-content-muted">View-only — you can't deploy this service.</span>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function EnvRow({ env }: { env: ServiceEnvironment }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg bg-surface-base px-3 py-2 text-sm">
+      <span className="w-20 shrink-0 text-[11px] uppercase tracking-wide text-content-muted">
+        {env.environment}
+      </span>
+      <StatusDot status={env.status} />
+      <span className="font-mono text-content-secondary">{env.version}</span>
+      <span className="truncate font-mono text-[11px] text-content-muted">
+        {env.branch}@{env.commit}
+      </span>
+      {env.aheadOfProd && (
+        <span className="rounded border border-status-info/40 bg-status-info/10 px-1.5 py-0.5 text-[10px] font-medium text-status-info">
+          ahead
+        </span>
+      )}
+      <span className="ml-auto shrink-0 text-[11px] text-content-muted">{shortDate(env.deployedAt)}</span>
+    </div>
+  );
+}

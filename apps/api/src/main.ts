@@ -3,7 +3,7 @@ import { Logger, ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module";
 
 // Surfaced on every boot so you can confirm the running build (per project convention).
-export const API_VERSION = "0.2.0";
+export const API_VERSION = "0.7.0";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

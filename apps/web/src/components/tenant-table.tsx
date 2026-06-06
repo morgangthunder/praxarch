@@ -25,7 +25,7 @@ export function TenantTable({ tenants }: { tenants: Tenant[] }) {
               <th className="px-4 py-2 font-medium">Client</th>
               <th className="px-4 py-2 font-medium">Autonomy</th>
               <th className="px-4 py-2 font-medium">Agents</th>
-              <th className="px-4 py-2 text-right font-medium">Spend</th>
+              <th className="px-4 py-2 text-right font-medium">Ad spend</th>
               <th className="px-4 py-2 text-right font-medium">Margin</th>
             </tr>
           </thead>

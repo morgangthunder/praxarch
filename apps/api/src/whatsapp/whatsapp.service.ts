@@ -4,7 +4,10 @@ import { randomUUID } from "node:crypto";
 import { CheckpointRepository } from "./checkpoint.repository";
 import { N8nClientService } from "./n8n-client.service";
 import { parseReply } from "./reply-parser";
-import { Checkpoint } from "./checkpoint.types";
+import { Checkpoint, DeployActionPayload } from "./checkpoint.types";
+import { CicdService } from "../cicd/cicd.service";
+import { MarketingService } from "../marketing/marketing.service";
+import type { ContentPublishPayload } from "../marketing/contracts";
 
 const CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
@@ -23,6 +26,8 @@ export class WhatsappService {
   constructor(
     private readonly checkpoints: CheckpointRepository,
     private readonly n8n: N8nClientService,
+    private readonly cicd: CicdService,
+    private readonly marketing: MarketingService,
     private readonly config: ConfigService
   ) {}
 
@@ -35,6 +40,66 @@ export class WhatsappService {
     summary: string;
     approverWaId: string;
   }): Promise<Checkpoint> {
+    return this.persistAndNotify({
+      tenantId: input.tenantId,
+      executionId: input.executionId,
+      resumeToken: input.resumeToken,
+      kind: input.kind,
+      action: { type: "n8n" },
+      summary: input.summary,
+      approverWaId: input.approverWaId,
+    });
+  }
+
+  /**
+   * Park a production-promote request for WhatsApp approval. Created by a Member
+   * who can deploy but not promote prod; on *YES* we run the deploy directly.
+   */
+  async openDeployCheckpoint(input: {
+    tenantId: string;
+    deploy: DeployActionPayload;
+    summary: string;
+    approverWaId: string;
+  }): Promise<Checkpoint> {
+    return this.persistAndNotify({
+      tenantId: input.tenantId,
+      kind: "deploy_promote",
+      action: { type: "deploy", deploy: input.deploy },
+      summary: input.summary,
+      approverWaId: input.approverWaId,
+    });
+  }
+
+  /**
+   * Park a content-publish request for WhatsApp approval. Created when a tenant is
+   * under APPROVAL_REQUIRED autonomy (or a Viewer/Member requests publish); on
+   * *YES* we publish via the Marketing OS adapter.
+   */
+  async openContentCheckpoint(input: {
+    tenantId: string;
+    content: ContentPublishPayload;
+    summary: string;
+    approverWaId: string;
+  }): Promise<Checkpoint> {
+    return this.persistAndNotify({
+      tenantId: input.tenantId,
+      kind: "content_publish",
+      action: { type: "publish", publish: input.content },
+      summary: input.summary,
+      approverWaId: input.approverWaId,
+    });
+  }
+
+  /** Shared: persist a checkpoint and ping the approver over WhatsApp. */
+  private async persistAndNotify(input: {
+    tenantId: string;
+    executionId?: string;
+    resumeToken?: string;
+    kind: Checkpoint["kind"];
+    action: Checkpoint["action"];
+    summary: string;
+    approverWaId: string;
+  }): Promise<Checkpoint> {
     const now = Date.now();
     const checkpoint: Checkpoint = {
       id: randomUUID(),
@@ -42,6 +107,7 @@ export class WhatsappService {
       executionId: input.executionId,
       resumeToken: input.resumeToken,
       kind: input.kind,
+      action: input.action,
       summary: input.summary,
       approverWaId: input.approverWaId,
       status: "awaiting",
@@ -55,7 +121,9 @@ export class WhatsappService {
       `🔔 *Approval needed*\n\n${input.summary}\n\nReply *YES* to proceed, *NO* to cancel, or send edits.`
     );
 
-    this.logger.log(`Checkpoint ${checkpoint.id} opened for tenant ${input.tenantId}`);
+    this.logger.log(
+      `Checkpoint ${checkpoint.id} (${input.kind}) opened for tenant ${input.tenantId}`
+    );
     return checkpoint;
   }
 
@@ -79,9 +147,40 @@ export class WhatsappService {
 
     const decision = parseReply(body);
 
+    // Deploy checkpoints can't be "edited" — only approved or cancelled.
+    if (checkpoint.action.type === "deploy") {
+      if (decision.action === "approve") {
+        await this.cicd.executeApprovedDeploy(
+          checkpoint.action.deploy,
+          checkpoint.tenantId,
+          fromWaId
+        );
+        await this.checkpoints.updateStatus(checkpoint.id, "approved");
+        await this.sendWhatsapp(fromWaId, "✅ Approved — promoting to production now.");
+      } else {
+        await this.checkpoints.updateStatus(checkpoint.id, "rejected");
+        await this.sendWhatsapp(fromWaId, "🛑 Cancelled — production was not changed.");
+      }
+      return { resolved: true };
+    }
+
+    // Content-publish checkpoints: approve → publish via the Marketing OS.
+    if (checkpoint.action.type === "publish") {
+      if (decision.action === "approve") {
+        await this.marketing.publishApprovedContent(checkpoint.action.publish, checkpoint.tenantId);
+        await this.checkpoints.updateStatus(checkpoint.id, "approved");
+        await this.sendWhatsapp(fromWaId, "✅ Approved — publishing now.");
+      } else {
+        await this.checkpoints.updateStatus(checkpoint.id, "rejected");
+        await this.sendWhatsapp(fromWaId, "🛑 Cancelled — nothing was published.");
+      }
+      return { resolved: true };
+    }
+
+    // n8n-backed checkpoints: resume the parked execution with the decision.
     await this.n8n.resume({
-      executionId: checkpoint.executionId,
-      resumeToken: checkpoint.resumeToken,
+      executionId: checkpoint.executionId ?? "",
+      resumeToken: checkpoint.resumeToken ?? "",
       decision,
       tenantId: checkpoint.tenantId,
     });
@@ -106,7 +205,10 @@ export class WhatsappService {
     const token = this.config.get<string>("TWILIO_AUTH_TOKEN");
     const from = this.config.get<string>("TWILIO_WHATSAPP_FROM");
     if (!sid || !token || !from) {
-      throw new HttpException("Twilio not configured", HttpStatus.INTERNAL_SERVER_ERROR);
+      // Non-fatal in local/dev: log the message instead of failing the request,
+      // so the checkpoint still persists and the flow is exercisable.
+      this.logger.warn(`Twilio not configured — would send to ${to}: ${body.replace(/\n/g, " ")}`);
+      return;
     }
 
     const form = new URLSearchParams({ To: to, From: from, Body: body });

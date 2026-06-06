@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
+import { Sparkles } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { MOCK_TENANTS } from "@/lib/mock-data";
+import { useAssistant } from "@/components/assistant/assistant-context";
 
 /**
  * Global Cmd+K command bar.
@@ -15,7 +17,16 @@ import { MOCK_TENANTS } from "@/lib/mock-data";
  */
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const router = useRouter();
+  const { ask } = useAssistant();
+
+  // Hand the typed query off to the agentic assistant.
+  const handOff = () => {
+    setOpen(false);
+    ask(search.trim() || "What can you do?");
+    setSearch("");
+  };
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -60,35 +71,43 @@ export function CommandMenu() {
             <div className="border-b border-border-subtle px-3">
               <Command.Input
                 autoFocus
-                placeholder="Type a command or search…"
+                value={search}
+                onValueChange={setSearch}
+                placeholder="Type a command, search, or ask the assistant…"
                 className="h-12 w-full bg-transparent text-sm text-content-primary outline-none placeholder:text-content-muted"
               />
             </div>
             <Command.List className="max-h-80 overflow-y-auto p-2">
               <Command.Empty className="px-3 py-6 text-center text-sm text-content-muted">
-                No results found.
+                No commands match — press Enter to ask the assistant.
               </Command.Empty>
 
-              <Group heading="Clients">
+              <Group heading="Assistant">
+                <Item onSelect={handOff} value={`ask-assistant ${search}`} forceMount>
+                  <Sparkles className="h-3.5 w-3.5 text-status-pending" />
+                  <span>{search.trim() ? `Ask: ${search.trim()}` : "Ask the assistant…"}</span>
+                </Item>
+              </Group>
+
+              <Group heading="Workspaces">
                 {MOCK_TENANTS.map((t) => (
-                  <Item key={t.id} onSelect={() => run(`/app/${t.slug}`)}>
+                  <Item key={t.id} onSelect={() => run(`/app/${t.slug}/overview`)}>
                     <span className="text-content-secondary">Open</span> {t.name}
                   </Item>
                 ))}
               </Group>
 
-              <Group heading="Deploy">
-                <Item onSelect={() => run("deploy:staging")}>Deploy → staging</Item>
-                <Item onSelect={() => run("deploy:production")}>
-                  Deploy → production
-                  <span className="ml-auto text-status-pending">requires approval</span>
-                </Item>
+              <Group heading="Modules">
+                <Item onSelect={() => run("/app/acme/crm")}>CRM — pipeline &amp; contacts</Item>
+                <Item onSelect={() => run("/app/acme/acquisition")}>Customer Acquisition</Item>
+                <Item onSelect={() => run("/app/acme/deployments")}>Deployments</Item>
               </Group>
 
-              <Group heading="Admin">
-                <Item onSelect={() => run("/tenants")}>Manage tenants &amp; access</Item>
-                <Item onSelect={() => run("/flows")}>Open Flow Studio</Item>
-                <Item onSelect={() => run("/prompts")}>Edit prompt registry</Item>
+              <Group heading="Super Admin">
+                <Item onSelect={() => run("/admin")}>Control Center</Item>
+                <Item onSelect={() => run("/admin/tenants")}>Manage tenants &amp; access</Item>
+                <Item onSelect={() => run("/admin/flows")}>Open Flow Studio</Item>
+                <Item onSelect={() => run("/admin/prompts")}>Edit prompt registry</Item>
               </Group>
             </Command.List>
           </Command>
@@ -109,10 +128,22 @@ function Group({ heading, children }: { heading: string; children: React.ReactNo
   );
 }
 
-function Item({ children, onSelect }: { children: React.ReactNode; onSelect: () => void }) {
+function Item({
+  children,
+  onSelect,
+  value,
+  forceMount,
+}: {
+  children: React.ReactNode;
+  onSelect: () => void;
+  value?: string;
+  forceMount?: true;
+}) {
   return (
     <Command.Item
       onSelect={onSelect}
+      value={value}
+      forceMount={forceMount}
       className={cn(
         "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-content-primary",
         "data-[selected=true]:bg-surface-base"

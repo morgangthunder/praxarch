@@ -41,6 +41,16 @@ export interface UniversalContentAction {
   options?: Record<string, unknown>;
 }
 
+/** Payload to publish an already-approved piece of content (HITL approval path). */
+export interface ContentPublishPayload {
+  brandId: string;
+  platforms: SocialPlatform[];
+  caption: string;
+  hashtags?: string[];
+  /** ISO time to publish; omit for immediate. */
+  scheduledAt?: string;
+}
+
 /** Normalized per-platform outcome returned by every adapter. */
 export interface PlatformPublishResult {
   platform: SocialPlatform;

@@ -82,6 +82,9 @@ services:
       PORT: 3901
       NODE_ENV: development
       CORS_ORIGINS: http://localhost:3900
+      # Local/guest mode — resolves a demo tenant (full caps) without a JWT.
+      # Set to 'cognito'/'external' in real deployments.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-none}
       DATABASE_URL: postgres://${POSTGRES_USER:-praxarch}:${POSTGRES_PASSWORD:-praxarch}@postgres:5432/${POSTGRES_DB:-praxarch}
       REDIS_URL: redis://redis:6379
       N8N_BASE_URL: http://n8n:5678
@@ -89,14 +92,25 @@ services:
       COOLIFY_API_URL: ${COOLIFY_API_URL:-}
       COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN:-}
       COOLIFY_WEBHOOK_SECRET: ${COOLIFY_WEBHOOK_SECRET:-}
+      # Deploy driver: 'simulate' (default when Coolify unset) or 'coolify'.
+      DEPLOY_DRIVER: ${DEPLOY_DRIVER:-simulate}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM:-}
       PUBLIC_WEBHOOK_BASE: ${PUBLIC_WEBHOOK_BASE:-http://localhost:3901}
+      DEPLOY_APPROVER_WAID: ${DEPLOY_APPROVER_WAID:-whatsapp:+3530000000}
+      CONTENT_APPROVER_WAID: ${CONTENT_APPROVER_WAID:-}
       UNIFIED_API_URL: ${UNIFIED_API_URL:-https://api.unified.to}
       UNIFIED_API_KEY: ${UNIFIED_API_KEY:-}
+      # xAI Grok for the agentic assistant (placeholder router used if unset).
+      GROK_API_KEY: ${GROK_API_KEY:-}
+      GROK_API_URL: ${GROK_API_URL:-https://api.x.ai/v1}
+      GROK_MODEL: ${GROK_MODEL:-grok-2-latest}
     ports:
       - "3901:3901"
+    # Lets the API reach a local Coolify running in a WSL2 distro on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./apps/api:/app
       - praxarch_api_node_modules:/app/node_modules

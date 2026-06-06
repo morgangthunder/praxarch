@@ -15,11 +15,13 @@ export function AllowancePanel({
   used,
   topUpRemaining,
   period,
+  readOnly = false,
 }: {
   includedAllowance: number;
   used: number;
   topUpRemaining: number;
   period: string;
+  readOnly?: boolean;
 }) {
   const [extra, setExtra] = useState(0);
 
@@ -57,6 +59,7 @@ export function AllowancePanel({
           </div>
         </div>
 
+        {!readOnly && (
         <div>
           <div className="mb-2 text-xs font-medium uppercase tracking-wide text-content-muted">
             Top up
@@ -82,6 +85,7 @@ export function AllowancePanel({
             </div>
           )}
         </div>
+        )}
       </CardBody>
     </Card>
   );

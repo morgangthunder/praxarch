@@ -4,7 +4,6 @@ import { AgentCard } from "@/components/agent-card";
 import { TenantTable } from "@/components/tenant-table";
 import { CreditMeter } from "@/components/credit-meter";
 import { CheckpointQueue } from "@/components/checkpoint-queue";
-import { DeployButton } from "@/components/deploy-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   MOCK_AGENTS,
@@ -28,14 +27,13 @@ export default function ControlCenterPage() {
       <PageHeader
         title="Control Center"
         subtitle="Global observability across all tenants and the MoM strategist network."
-        actions={<DeployButton environment="production" />}
       />
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Tenants" value={String(MOCK_TENANTS.length)} status="active" />
         <Stat label="Active agents" value={String(activeAgents)} status="active" />
         <Stat label="Awaiting approval" value={String(MOCK_CHECKPOINTS.length)} status="pending" />
-        <Stat label="Monthly spend" value={formatCurrency(totalSpend)} status="info" />
+        <Stat label="Total ad spend" value={formatCurrency(totalSpend)} status="info" />
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

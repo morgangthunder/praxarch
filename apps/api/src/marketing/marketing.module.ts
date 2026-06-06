@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { MarketingService } from "./marketing.service";
+import { ContentService } from "./content.service";
+import { ContentController } from "./content.controller";
 import { AdapterRegistry } from "./adapter.registry";
 import { UnifiedToAdapter } from "./adapters/unified-to.adapter";
 import { MetaNativeAdapter } from "./adapters/meta-native.adapter";
@@ -10,7 +12,8 @@ import { MetaNativeAdapter } from "./adapters/meta-native.adapter";
  * adapter here, nothing else changes.
  */
 @Module({
-  providers: [MarketingService, AdapterRegistry, UnifiedToAdapter, MetaNativeAdapter],
+  controllers: [ContentController],
+  providers: [MarketingService, ContentService, AdapterRegistry, UnifiedToAdapter, MetaNativeAdapter],
   exports: [MarketingService, AdapterRegistry],
 })
 export class MarketingModule {}

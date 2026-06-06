@@ -1,74 +1,68 @@
 "use client";
 
 import { useState } from "react";
+import { Sparkles } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { useAssistant } from "@/components/assistant/assistant-context";
 
-interface Msg {
-  id: string;
-  role: "user" | "strategist";
-  text: string;
-}
-
-const SEED: Msg[] = [
-  { id: "m1", role: "strategist", text: "I've shifted 30% of budget toward video creatives — CPA dropped 18% last week. Want me to scale the winning ad set?" },
+const SUGGESTIONS = [
+  "List my services",
+  "Promote web-app to prod",
+  "Draft a launch post for LinkedIn",
 ];
 
 /**
- * Chat panel for refining business strategy with the Strategist (MoM root agent).
- * Production wires this to a streaming BFF endpoint; here it's a local stub.
+ * Strategy entry point for the Acquisition view. Hands off to the shared agentic
+ * assistant (Capability-layer tool-calling) rather than running its own stub —
+ * one assistant, one capability registry, everywhere.
  */
 export function StrategyChat({ tenantName }: { tenantName: string }) {
-  const [messages, setMessages] = useState<Msg[]>(SEED);
+  const { ask } = useAssistant();
   const [input, setInput] = useState("");
 
-  function send() {
+  const send = () => {
     const text = input.trim();
     if (!text) return;
-    setMessages((m) => [
-      ...m,
-      { id: crypto.randomUUID(), role: "user", text },
-      {
-        id: crypto.randomUUID(),
-        role: "strategist",
-        text: `Understood. I'll factor that into ${tenantName}'s plan and route any high-stakes changes for approval.`,
-      },
-    ]);
+    ask(text);
     setInput("");
-  }
+  };
 
   return (
     <Card className="flex h-[420px] flex-col">
       <CardHeader>
-        <CardTitle>Strategy Chat</CardTitle>
-        <span className="text-xs text-content-muted">Strategist agent</span>
+        <CardTitle>Strategy Assistant</CardTitle>
+        <span className="text-xs text-content-muted">
+          Runs {tenantName}&apos;s platform actions — opens in the Assistant panel
+        </span>
       </CardHeader>
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={cn(
-              "max-w-[85%] rounded-lg border px-3 py-2 text-sm",
-              m.role === "user"
-                ? "ml-auto border-border-strong bg-surface-overlay text-content-primary"
-                : "border-border-subtle bg-surface-base text-content-secondary"
-            )}
-          >
-            {m.text}
-          </div>
-        ))}
+      <div className="flex flex-1 flex-col justify-center gap-3 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm text-content-secondary">
+          <Sparkles className="h-4 w-4 text-status-pending" />
+          Ask the assistant to plan or execute — it routes high-stakes actions for approval.
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => ask(s)}
+              className="rounded-lg border border-border-subtle bg-surface-base px-2.5 py-1.5 text-xs text-content-secondary transition-colors hover:border-border-strong hover:text-content-primary"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="flex items-center gap-2 border-t border-border-subtle p-2.5">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Refine strategy…"
+          placeholder="Ask the strategist…"
           className="h-9 flex-1 rounded-lg border border-border-subtle bg-surface-base px-3 text-sm text-content-primary outline-none placeholder:text-content-muted focus:border-border-strong"
         />
         <Button variant="primary" size="md" onClick={send}>
-          Send
+          Ask
         </Button>
       </div>
     </Card>

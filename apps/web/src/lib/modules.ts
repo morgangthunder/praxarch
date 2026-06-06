@@ -5,6 +5,7 @@ import {
   Landmark,
   Workflow,
   SlidersHorizontal,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ import {
 export type ModuleKey =
   | "overview"
   | "acquisition"
+  | "crm"
   | "automations"
   | "deployments"
   | "finances"
@@ -63,6 +65,14 @@ export const MODULES: ModuleDef[] = [
     path: "acquisition",
     icon: Megaphone,
     blurb: "AI marketing, ad management, and content creation across channels.",
+    minTier: "starter",
+  },
+  {
+    key: "crm",
+    label: "CRM",
+    path: "crm",
+    icon: Users,
+    blurb: "Contacts and pipeline — where Acquisition leads land and deals close.",
     minTier: "starter",
   },
   {

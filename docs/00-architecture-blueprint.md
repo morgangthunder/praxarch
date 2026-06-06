@@ -281,6 +281,8 @@ sequenceDiagram
 
 ## 10. Phase Roadmap
 
+**Build order and gates:** see [09-master-plan.md](09-master-plan.md) — the ordered checklist for what to implement next (Deployments + WhatsApp → CRM → deferred CA).
+
 | Phase | Deliverable | Doc |
 |---|---|---|
 | **0** | This blueprint | — |

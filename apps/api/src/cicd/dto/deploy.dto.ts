@@ -13,12 +13,19 @@ export class DeployRequestDto {
   @IsOptional()
   @IsString()
   ref?: string;
+
+  /** Service id within the tenant (e.g. "web") — used to update env status after deploy. */
+  @IsOptional()
+  @IsString()
+  serviceId?: string;
 }
+
+export type DeployRunStatus = "queued" | "building" | "success" | "failed";
 
 export interface DeployResult {
   deploymentId: string;
   project: string;
   environment: string;
-  status: "queued";
+  status: DeployRunStatus;
   tag: string;
 }

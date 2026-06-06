@@ -4,10 +4,10 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
+  getAdSpend,
   getPendingActions,
   getTenant,
   MOCK_AUTOMATIONS,
-  MOCK_CAMPAIGNS,
   MOCK_CREDITS_USED,
   MOCK_DEPLOYMENTS,
   MOCK_FINANCE,
@@ -34,7 +34,7 @@ export default async function OverviewPage({
   const usedPct = Math.round((MOCK_CREDITS_USED / allowance) * 100);
   const actions = getPendingActions(tenant);
 
-  const adSpend = MOCK_CAMPAIGNS.reduce((s, c) => s + c.spendEur, 0);
+  const adSpend = getAdSpend(tenant);
   const activeAutomations = MOCK_AUTOMATIONS.filter((a) => a.status === "active").length;
   const lastDeploy = MOCK_DEPLOYMENTS[0];
 

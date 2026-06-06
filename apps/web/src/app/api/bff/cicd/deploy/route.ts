@@ -15,12 +15,14 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const sessionToken = req.cookies.get("praxarch_session")?.value;
+  const tenant = req.headers.get("x-praxarch-tenant");
 
   const res = await fetch(`${apiBase}/cicd/deploy`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+      ...(tenant ? { "x-praxarch-tenant": tenant } : {}),
     },
     body: JSON.stringify(body),
     cache: "no-store",

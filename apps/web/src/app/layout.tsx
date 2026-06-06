@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { VersionLogger } from "@/components/version-logger";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,7 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // Each surface (super-admin vs tenant app) supplies its own shell via nested layouts.
   return (
     <html lang="en" className="dark">
-      <body>{children}</body>
+      <body>
+        <VersionLogger />
+        {children}
+      </body>
     </html>
   );
 }

@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { AdapterRegistry } from "./adapter.registry";
 import {
+  ContentPublishPayload,
   PublishResult,
   SocialPlatform,
   UniversalContentAction,
@@ -72,6 +73,29 @@ export class MarketingService {
     );
 
     return result;
+  }
+
+  /**
+   * Publish a specific, already-approved piece of content. Called by the HITL
+   * engine after a human approves it over WhatsApp (no further generation step).
+   */
+  async publishApprovedContent(
+    payload: ContentPublishPayload,
+    tenantId: string
+  ): Promise<PublishResult> {
+    const action: UniversalContentAction = {
+      actionId: randomUUID(),
+      tenantId,
+      brandId: payload.brandId,
+      platforms: payload.platforms,
+      caption: payload.caption,
+      hashtags: payload.hashtags,
+      media: [],
+      scheduledAt: payload.scheduledAt,
+    };
+    const adapter = this.registry.forBrand(payload.brandId);
+    this.logger.log(`Publishing approved content ${action.actionId} via ${adapter.key}`);
+    return adapter.publish(action);
   }
 
   /**

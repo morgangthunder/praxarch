@@ -1,4 +1,5 @@
 import { Injectable, NestMiddleware, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import type { NextFunction, Request, Response } from "express";
 import type { TenantContext } from "./tenant-context";
 
@@ -16,7 +17,23 @@ import type { TenantContext } from "./tenant-context";
  */
 @Injectable()
 export class TenantResolverMiddleware implements NestMiddleware {
+  constructor(private readonly config: ConfigService) {}
+
   use(req: Request, _res: Response, next: NextFunction): void {
+    // Local/guest mode: no real IdP. Resolve a demo tenant from a header so the
+    // app is fully exercisable without a JWT. NEVER enabled in production.
+    if (this.config.get<string>("AUTH_PROVIDER") === "none") {
+      const slug = (req.headers["x-praxarch-tenant"] as string) || "acme";
+      req.tenant = {
+        tenantId: slug,
+        schema: `tenant_${slug}`,
+        accountId: "dev-user",
+        // Full capabilities so deploy + promote + publish are demoable locally.
+        roles: ["platform:operator", "platform:release", "owner"],
+      };
+      return next();
+    }
+
     const claims = this.verifyAndDecode(req.headers.authorization);
     const tenantId = claims.tenantId;
 

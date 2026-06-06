@@ -1,6 +1,6 @@
 {
   "name": "@praxarch/web",
-  "version": "0.2.0",
+  "version": "0.15.0",
   "private": true,
   "description": "Praxarch multi-tenant control center & client dashboards (Next.js App Router).",
   "scripts": {
