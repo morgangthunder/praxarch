@@ -204,6 +204,12 @@ export class CicdService {
       }
     }
 
+    // Pre-deploy guard: self-heal the external `coolify` network on the target
+    // server (both staging & prod) so a pruned network doesn't fail the deploy.
+    if (target?.coolifyServerUuid) {
+      await this.prodPostDeploy.ensureCoolifyNetwork(tenantId, target.coolifyServerUuid);
+    }
+
     if (target && isSourceBuildProfile(deployProfile)) {
       const branch = dto.ref?.trim() || target.branch;
       const deploymentId = `ssh-${randomUUID()}`;

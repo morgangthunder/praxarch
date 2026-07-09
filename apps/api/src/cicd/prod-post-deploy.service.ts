@@ -60,6 +60,32 @@ export class ProdPostDeployService {
     }
   }
 
+  /**
+   * Pre-deploy guard: ensure the external `coolify` Docker network exists on the
+   * target server. Coolify attaches app containers to it; if it was pruned
+   * (disk cleanup / daemon restart) the deploy fails with "network coolify not
+   * found". Best-effort — a failure here is logged but does not block the deploy
+   * (the deploy will surface the real error if the network truly can't be made).
+   */
+  async ensureCoolifyNetwork(tenantId: string, serverUuid: string): Promise<boolean> {
+    try {
+      const { host, port, user, privateKey } = await this.sshTarget(serverUuid, tenantId);
+      const cmd =
+        "docker network inspect coolify >/dev/null 2>&1 && echo NET_EXISTS || " +
+        "(docker network create --attachable coolify >/dev/null 2>&1 || sudo docker network create --attachable coolify >/dev/null 2>&1) && echo NET_CREATED";
+      const result = await runSshCommand({ host, port, user, privateKey, command: cmd, timeoutMs: 30_000 });
+      const out = (result.stdout || result.stderr).trim();
+      const last = out.split("\n").pop() ?? out;
+      this.logger.log(`ensureCoolifyNetwork ${serverUuid}: ${last}`);
+      return out.includes("NET_EXISTS") || out.includes("NET_CREATED");
+    } catch (err) {
+      this.logger.warn(
+        `ensureCoolifyNetwork failed for ${serverUuid}: ${(err as Error).message}`
+      );
+      return false;
+    }
+  }
+
   private async sshTarget(uuid: string, tenantId: string) {
     const raw = await this.coolify.getServer(uuid);
     if (!this.servers.isVisibleToTenant(raw, tenantId)) {
