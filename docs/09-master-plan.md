@@ -371,8 +371,8 @@ Locked order inside CA (when started):
 ### Suggested implementation order within Gate 1.5
 
 1. **1.5a** Host Coolify in the Docker stack (`--profile coolify`) + API can authenticate  
-2. **1.5b** `deploy_targets` table; resolve app UUID from DB (retire env-var mapping)  
-3. **1.5c** `CoolifyProvisioningService` + `deployments.provisionService` capability (public repo first)  
+2. **1.5b** `deploy_targets` table; resolve app UUID from DB (retire env-var mapping) — ✅ shipped (API v0.7.1)  
+3. **1.5c** `CoolifyProvisioningService` + `deployments.provisionService` capability — ✅ shipped (API v0.7.2)  
 4. **1.5d** Wire the Add-Deployment wizard to real provisioning with progress UI  
 5. **1.5e** Secrets vault for private-repo creds  
 6. **1.5f** Assistant + Cmd+K parity  

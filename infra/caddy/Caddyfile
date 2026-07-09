@@ -1,0 +1,19 @@
+{
+	email {$ACME_EMAIL:ops@example.com}
+}
+
+{$PRAXARCH_DOMAIN:localhost} {
+	encode gzip
+
+	handle /api/bff/* {
+		reverse_proxy web:3000
+	}
+
+	handle /cicd/webhooks/* {
+		reverse_proxy api:3901
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

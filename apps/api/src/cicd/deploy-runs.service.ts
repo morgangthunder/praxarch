@@ -12,7 +12,7 @@ interface DeployRunRow {
   status: DeployRunStatus;
   tag: string;
   actor: string;
-  driver: "simulate" | "coolify";
+  driver: "simulate" | "coolify" | "ssh-build" | "ecr-release";
   commit_sha: string | null;
   error_message: string | null;
   created_at: Date;
@@ -34,7 +34,7 @@ export class DeployRunsService {
     environment: "staging" | "production";
     tag: string;
     actor: string;
-    driver: "simulate" | "coolify";
+    driver: "simulate" | "coolify" | "ssh-build" | "ecr-release";
   }): Promise<DeployRunRecord> {
     const rows = await this.db.query<DeployRunRow>(
       `INSERT INTO public.deploy_runs
@@ -71,6 +71,17 @@ export class DeployRunsService {
       [id]
     );
     return rows[0] ? this.toRecord(rows[0]) : null;
+  }
+
+  async listByTenant(tenantId: string, limit = 20): Promise<DeployRunRecord[]> {
+    const rows = await this.db.query<DeployRunRow>(
+      `SELECT * FROM public.deploy_runs
+       WHERE tenant_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [tenantId, limit]
+    );
+    return rows.map((row) => this.toRecord(row));
   }
 
   async updateStatus(

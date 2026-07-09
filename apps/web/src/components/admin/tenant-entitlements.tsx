@@ -19,6 +19,7 @@ import {
 } from "@/lib/modules";
 import type { Tenant } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { OpenTenantWorkspace } from "@/components/admin/open-tenant-workspace";
 
 /**
  * Super-admin control for per-tenant module access.
@@ -61,7 +62,18 @@ export function TenantEntitlementsManager({ tenants }: { tenants: Tenant[] }) {
                 <CardTitle>{t.name}</CardTitle>
                 <span className="text-xs text-content-muted">/{t.slug}</span>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <OpenTenantWorkspace slug={t.slug} name={t.name} variant="ghost" />
+                {hasModuleAccess(ent, "deployments") && (
+                  <OpenTenantWorkspace
+                    slug={t.slug}
+                    name={t.name}
+                    path="deployments"
+                    variant="ghost"
+                  >
+                    Deployments
+                  </OpenTenantWorkspace>
+                )}
                 <span className="text-xs text-content-muted">
                   {formatCurrency(plan.priceEurMonthly)}
                   {addOnMonthlyTotal(ent) > 0 ? ` + ${formatCurrency(addOnMonthlyTotal(ent))}` : ""}/mo

@@ -12,11 +12,35 @@ export class ChatTurnDto {
 export class ChatContextDto {
   @IsOptional()
   @IsString()
+  role?: string;
+
+  @IsOptional()
+  @IsString()
   module?: string;
 
   @IsOptional()
   @IsString()
   route?: string;
+
+  @IsOptional()
+  @IsString()
+  wizardStep?: string;
+
+  @IsOptional()
+  @IsString()
+  wizardHosting?: string;
+
+  @IsOptional()
+  @IsString()
+  wizardStepIndex?: string;
+
+  @IsOptional()
+  @IsString()
+  wizardRepo?: string;
+
+  @IsOptional()
+  @IsString()
+  wizardName?: string;
 }
 
 export class ChatDto {

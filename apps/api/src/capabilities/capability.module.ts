@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { SecretsModule } from "../common/secrets/secrets.module";
 import { CicdModule } from "../cicd/cicd.module";
 import { MarketingModule } from "../marketing/marketing.module";
 import { WhatsappModule } from "../whatsapp/whatsapp.module";
@@ -13,7 +14,7 @@ import { CapabilityAuditService } from "./capability-audit.service";
  * module can dispatch the same catalogue the UI uses.
  */
 @Module({
-  imports: [CicdModule, MarketingModule, WhatsappModule, SettingsModule],
+  imports: [CicdModule, SecretsModule, MarketingModule, WhatsappModule, SettingsModule],
   controllers: [CapabilityController],
   providers: [CapabilityService, CapabilityAuditService],
   exports: [CapabilityService],

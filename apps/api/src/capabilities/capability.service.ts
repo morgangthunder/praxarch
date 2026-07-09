@@ -1,9 +1,16 @@
 import { HttpException, Injectable, Logger, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { CicdService } from "../cicd/cicd.service";
+import { CoolifyEnvService } from "../cicd/coolify-env.service";
+import { CoolifyProvisioningService } from "../cicd/coolify-provisioning.service";
+import { CoolifyServersService } from "../cicd/coolify-servers.service";
+import { ProvisionBundleService } from "../cicd/provision-bundle.service";
 import { ServicesService } from "../cicd/services.service";
+import { GitHubService } from "../common/secrets/github.service";
 import { MarketingService } from "../marketing/marketing.service";
 import { WhatsappService } from "../whatsapp/whatsapp.service";
 import { WorkspaceSettingsService } from "../settings/workspace-settings.service";
+import { DeploymentDiagnoseService } from "../cicd/deployment-diagnose.service";
+import { DeploymentComposeService } from "../cicd/deployment-compose.service";
 import { CapabilityRegistry } from "./capability.registry";
 import { buildCapabilities } from "./capability.definitions";
 import { CapabilityAuditService } from "./capability-audit.service";
@@ -28,10 +35,17 @@ export class CapabilityService implements OnModuleInit {
 
   constructor(
     private readonly cicd: CicdService,
+    private readonly provisioning: CoolifyProvisioningService,
+    private readonly provisionBundle: ProvisionBundleService,
+    private readonly coolifyServers: CoolifyServersService,
+    private readonly coolifyEnv: CoolifyEnvService,
+    private readonly github: GitHubService,
     private readonly services: ServicesService,
     private readonly marketing: MarketingService,
     private readonly whatsapp: WhatsappService,
     private readonly settings: WorkspaceSettingsService,
+    private readonly deploymentDiagnose: DeploymentDiagnoseService,
+    private readonly deploymentCompose: DeploymentComposeService,
     private readonly audit: CapabilityAuditService
   ) {}
 
@@ -39,10 +53,17 @@ export class CapabilityService implements OnModuleInit {
     this.registry.register(
       buildCapabilities({
         cicd: this.cicd,
+        provisioning: this.provisioning,
+        provisionBundle: this.provisionBundle,
+        coolifyServers: this.coolifyServers,
+        coolifyEnv: this.coolifyEnv,
+        github: this.github,
         services: this.services,
         marketing: this.marketing,
         whatsapp: this.whatsapp,
         settings: this.settings,
+        deploymentDiagnose: this.deploymentDiagnose,
+        deploymentCompose: this.deploymentCompose,
       })
     );
     this.logger.log(`Registered ${this.registry.list().length} capabilities.`);
@@ -72,7 +93,7 @@ export class CapabilityService implements OnModuleInit {
         actor,
         status: result.status,
         credits: result.status === "error" ? 0 : cap.credits,
-        input,
+        input: redactCapabilityInput(input),
         result: result.data ?? result.message ?? null,
       });
       return result;
@@ -85,10 +106,20 @@ export class CapabilityService implements OnModuleInit {
         actor,
         status: "error",
         credits: 0,
-        input,
+        input: redactCapabilityInput(input),
         result: message,
       });
       throw err;
     }
   }
+}
+
+function redactCapabilityInput(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...input };
+  for (const key of Object.keys(out)) {
+    if (/token|secret|password|key|envtext|privatekey/i.test(key) && typeof out[key] === "string") {
+      out[key] = "[redacted]";
+    }
+  }
+  return out;
 }

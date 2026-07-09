@@ -19,6 +19,7 @@ const SUPER_ADMIN_LINKS = [
   { href: "/admin", label: "Control Center" },
   { href: "/admin/tenants", label: "Tenants" },
   { href: "/admin/flows", label: "Flow Studio" },
+  { href: "/admin/ai-models", label: "AI Models" },
   { href: "/admin/prompts", label: "Prompt Registry" },
 ];
 
@@ -118,7 +119,7 @@ export function TenantShell({ tenant, children }: { tenant: Tenant; children: Re
 
   return (
     <WorkspaceProvider value={{ view, setView: changeView, tenantSlug: tenant.slug, tenantName: tenant.name }}>
-      <AssistantProvider tenantSlug={tenant.slug}>
+      <AssistantProvider tenantSlug={tenant.slug} role={view}>
       <div className="flex min-h-screen bg-surface-base">
         <aside className="hidden w-60 shrink-0 flex-col border-r border-border-subtle bg-surface-raised md:flex">
           <div className="flex h-14 items-center gap-2 px-4">

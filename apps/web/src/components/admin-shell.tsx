@@ -8,6 +8,7 @@ import {
   Building2,
   Workflow,
   ScrollText,
+  Brain,
   ArrowLeft,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin", label: "Control Center", icon: LayoutDashboard },
   { href: "/admin/tenants", label: "Tenants", icon: Building2 },
   { href: "/admin/flows", label: "Flow Studio", icon: Workflow },
+  { href: "/admin/ai-models", label: "AI Models", icon: Brain },
   { href: "/admin/prompts", label: "Prompt Registry", icon: ScrollText },
 ];
 

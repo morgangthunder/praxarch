@@ -1,9 +1,10 @@
 import { NestFactory } from "@nestjs/core";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module";
+import { API_VERSION } from "./version";
 
-// Surfaced on every boot so you can confirm the running build (per project convention).
-export const API_VERSION = "0.7.0";
+// Re-exported for backwards compatibility; canonical value lives in version.ts.
+export { API_VERSION };
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

@@ -49,6 +49,11 @@ export class GrokClient {
     return this.apiKey.length > 0;
   }
 
+  /** Model + endpoint in effect — surfaced on boot so the running config is visible. */
+  describe(): { model: string; baseUrl: string; configured: boolean } {
+    return { model: this.model, baseUrl: this.baseUrl, configured: this.isConfigured() };
+  }
+
   async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ChatCompletion> {
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",

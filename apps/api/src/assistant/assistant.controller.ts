@@ -25,8 +25,14 @@ export class AssistantController {
 
     const stream = this.assistant.stream(dto.messages, {
       tenant,
+      role: dto.context?.role,
       module: dto.context?.module,
       route: dto.context?.route,
+      wizardStep: dto.context?.wizardStep,
+      wizardHosting: dto.context?.wizardHosting,
+      wizardStepIndex: dto.context?.wizardStepIndex,
+      wizardRepo: dto.context?.wizardRepo,
+      wizardName: dto.context?.wizardName,
     });
 
     for await (const event of stream) {

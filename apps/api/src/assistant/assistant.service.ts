@@ -1,8 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { CapabilityService } from "../capabilities/capability.service";
 import type { CapabilitySummary } from "../capabilities/capability.types";
 import type { TenantContext } from "../common/tenant/tenant-context";
-import { ChatMessage, GrokClient, ToolDefinition } from "./grok.client";
+import { DEFAULT_ASSISTANT_CASE_KEY, type ContextFieldsConfig } from "../prompts/ai-case.types";
+import { ASSISTANT_DEPLOYMENTS_TROUBLESHOOTING_KEY } from "../prompts/prompt-registry.types";
+import { AssistantCaseService } from "../prompts/assistant-case.service";
+import { PromptRegistryService } from "../prompts/prompt-registry.service";
+import { ChatMessage, LlmClient, ToolDefinition } from "./llm.client";
 
 /** Streamed events the controller turns into SSE frames. */
 export type AssistantEvent =
@@ -19,8 +23,15 @@ export interface ChatTurn {
 
 export interface AssistantContext {
   tenant: TenantContext;
+  /** The caller's workspace identity (owner/member/viewer/super_admin). */
+  role?: string;
   module?: string;
   route?: string;
+  wizardStep?: string;
+  wizardHosting?: string;
+  wizardStepIndex?: string;
+  wizardRepo?: string;
+  wizardName?: string;
 }
 
 const MAX_TOOL_ROUNDS = 5;
@@ -32,16 +43,36 @@ const MAX_TOOL_ROUNDS = 5;
  * a deterministic placeholder still routes a few common deployment commands.
  */
 @Injectable()
-export class AssistantService {
+export class AssistantService implements OnModuleInit {
   private readonly logger = new Logger(AssistantService.name);
-  private readonly grok = new GrokClient(process.env);
+  private readonly llm = new LlmClient(process.env);
 
-  constructor(private readonly capabilities: CapabilityService) {}
+  constructor(
+    private readonly capabilities: CapabilityService,
+    private readonly prompts: PromptRegistryService,
+    private readonly cases: AssistantCaseService
+  ) {}
+
+  /** Surface the running case/model on boot (per project convention). */
+  async onModuleInit(): Promise<void> {
+    const resolved = await this.cases.resolve(DEFAULT_ASSISTANT_CASE_KEY);
+    if (resolved.providerConfigured) {
+      this.logger.log(
+        `Assistant ready — case "${resolved.label}" → ${resolved.modelProvider}/${resolved.modelId} via ${resolved.resolvedBaseUrl}.`
+      );
+    } else {
+      const fb = this.llm.describeFallback();
+      this.logger.log(
+        `Assistant in placeholder mode — configure API key for ${resolved.modelProvider} (env fallback model "${fb.model}").`
+      );
+    }
+  }
 
   async *stream(history: ChatTurn[], ctx: AssistantContext): AsyncGenerator<AssistantEvent> {
     try {
-      if (this.grok.isConfigured()) {
-        yield* this.streamWithGrok(history, ctx);
+      const aiCase = await this.cases.resolve(DEFAULT_ASSISTANT_CASE_KEY);
+      if (this.llm.isConfigured({ provider: aiCase.modelProvider, model: aiCase.modelId, baseUrl: aiCase.resolvedBaseUrl })) {
+        yield* this.streamWithLlm(history, ctx, aiCase);
       } else {
         yield* this.streamPlaceholder(history, ctx);
       }
@@ -53,20 +84,26 @@ export class AssistantService {
     }
   }
 
-  // ── Grok tool-calling loop ──────────────────────────────────────────────
-  private async *streamWithGrok(
+  // ── LLM tool-calling loop (model from super-admin case config) ─────────
+  private async *streamWithLlm(
     history: ChatTurn[],
-    ctx: AssistantContext
+    ctx: AssistantContext,
+    aiCase: Awaited<ReturnType<AssistantCaseService["resolve"]>>
   ): AsyncGenerator<AssistantEvent> {
     const caps = this.capabilities.list();
     const tools = caps.map((c) => this.toToolDefinition(c));
+    const llmConfig = {
+      provider: aiCase.modelProvider,
+      model: aiCase.modelId,
+      baseUrl: aiCase.resolvedBaseUrl,
+    };
     const messages: ChatMessage[] = [
-      { role: "system", content: this.systemPrompt(ctx) },
+      { role: "system", content: await this.systemPrompt(ctx, aiCase) },
       ...history.map((t) => ({ role: t.role, content: t.content } as ChatMessage)),
     ];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const { message } = await this.grok.chat(messages, tools);
+      const { message } = await this.llm.chat(llmConfig, messages, tools);
       messages.push(message);
 
       if (message.tool_calls?.length) {
@@ -172,18 +209,125 @@ export class AssistantService {
     }
   }
 
-  private systemPrompt(ctx: AssistantContext): string {
-    // In production this is composed from the Dynamic Prompt Registry.
+  /**
+   * Composed every turn: editable guardrail + persona (super-admin Prompt
+   * Registry), then an auto-generated context block reflecting where the user
+   * is, then the live tool catalogue. Order matters — guardrails first.
+   */
+  private async systemPrompt(
+    ctx: AssistantContext,
+    aiCase: Awaited<ReturnType<AssistantCaseService["resolve"]>>
+  ): Promise<string> {
+    const { guardrail, behavior } = await this.prompts.composeForCase(
+      aiCase.guardrailPromptKey,
+      aiCase.behaviorPromptKey
+    );
+    const parts = [guardrail, behavior];
+    if (ctx.module === "deployments") {
+      try {
+        const troubleshoot = await this.prompts.resolveBody(ASSISTANT_DEPLOYMENTS_TROUBLESHOOTING_KEY);
+        parts.push(troubleshoot);
+      } catch {
+        /* prompt optional */
+      }
+    }
+    const ctxBlock = this.contextBlock(ctx, aiCase.contextFields);
+    if (ctxBlock) parts.push(ctxBlock);
+    if (aiCase.contextFields.tools) parts.push(this.toolsBlock());
+    return parts.filter((s) => s && s.trim()).join("\n\n");
+  }
+
+  /** Context block — only fields enabled for this assistant case. */
+  private contextBlock(ctx: AssistantContext, fields: ContextFieldsConfig): string | null {
+    const lines: string[] = ["## Current context"];
+    let any = false;
+
+    if (fields.tenant) {
+      lines.push(`- Active tenant: ${ctx.tenant.tenantId}`);
+      any = true;
+    }
+    if (fields.userRole) {
+      lines.push(`- User role: ${ctx.role ?? this.inferRole(ctx.tenant)}`);
+      any = true;
+    }
+    if (fields.tenantRoles) {
+      lines.push(`- Tenant roles (server-verified): ${ctx.tenant.roles.join(", ") || "none"}`);
+      any = true;
+    }
+    if (fields.currentTime) {
+      lines.push(`- Current time: ${new Date().toISOString()}`);
+      any = true;
+    }
+    if (fields.wizardStep && ctx.wizardStep) {
+      lines.push(`- Location: Add-deployment wizard, step "${ctx.wizardStep}"`);
+      any = true;
+    }
+    if (fields.wizardHosting && ctx.wizardHosting) {
+      lines.push(`- Hosting topology: ${ctx.wizardHosting}`);
+      any = true;
+    }
+    if (ctx.wizardStepIndex) {
+      lines.push(`- Wizard step number: ${ctx.wizardStepIndex}`);
+      any = true;
+    }
+    if (ctx.wizardName) {
+      lines.push(`- Service name (draft): ${ctx.wizardName}`);
+      any = true;
+    }
+    if (ctx.wizardRepo) {
+      lines.push(`- Repo (draft): ${ctx.wizardRepo}`);
+      any = true;
+    }
+    if (fields.wizardStep && ctx.wizardStep) {
+      lines.push(
+        "- Guidance: work through this step only; verify GitHub access and validate servers before advancing."
+      );
+    } else if (fields.module && ctx.module) {
+      lines.push(`- Location: "${ctx.module}" module${fields.route && ctx.route ? ` (${ctx.route})` : ""}`);
+      if (ctx.module === "deployments") {
+        lines.push(
+          "- Guidance: for deploy failures or 502 errors, call deployments.diagnoseEnvironment and deployments.compareServiceEnvKeys before suggesting fixes."
+        );
+      }
+      any = true;
+    } else if (fields.route && ctx.route) {
+      lines.push(`- Location: ${ctx.route}`);
+      any = true;
+    }
+
+    return any ? lines.join("\n") : null;
+  }
+
+  private toolsBlock(): string {
+    const deploymentTools = [
+      "deployments.listServices",
+      "deployments.listServers",
+      "deployments.registerServer",
+      "deployments.validateServer",
+      "deployments.verifyGitHubAccess",
+      "deployments.provisionDeployment (full wizard flow)",
+      "deployments.provisionService (single environment)",
+      "deployments.getServiceEnvVars / setServiceEnvVars / syncServiceEnvVars",
+      "deployments.compareServiceEnvKeys (staging vs production key gaps)",
+      "deployments.diagnoseEnvironment (read-only SSH/curl/log probe; detects stale-prebuilt-image)",
+      "deployments.buildFromSource (build app from Dockerfile when ECR/registry image is older than git)",
+      "deployments.ensureMcpOverlay (start docker-compose.mcp.yml)",
+      "deployments.mirrorEnvKeyFromProduction (copy ADMIN_SECRET etc. prod→staging)",
+      "deployments.ensureJwtSigningSecret (set lowercase secret from ADMIN_SECRET for legacy JWT apps)",
+      "deployments.deployStaging / deployments.promoteProduction",
+    ];
     return [
-      "You are the Praxarch operations assistant for a multi-tenant business platform.",
-      "You can configure and run deployments and publish marketing content by calling the provided tools.",
-      "Prefer a tool call over guessing. High-risk actions (production promotes, publishing) may require",
-      "human approval over WhatsApp; if a tool returns status 'awaiting_approval', tell the user it was sent for approval.",
-      ctx.module ? `The user is currently viewing the "${ctx.module}" module.` : "",
-      `Active tenant: ${ctx.tenant.tenantId}.`,
-    ]
-      .filter(Boolean)
-      .join(" ");
+      "## Tools",
+      "Every UI action has a matching tool; the full schema is provided separately. Key deployment tools:",
+      ...deploymentTools.map((t) => `- ${t}`),
+    ].join("\n");
+  }
+
+  /** Best-effort role label from server-verified roles when the UI didn't send one. */
+  private inferRole(tenant: TenantContext): string {
+    if (tenant.roles.includes("platform:operator")) return "super_admin";
+    if (tenant.roles.includes("owner")) return "owner";
+    return tenant.roles[0] ?? "unknown";
   }
 
   private toToolDefinition(cap: CapabilitySummary): ToolDefinition {

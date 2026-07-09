@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const res = await fetch(`${base}/cicd/services`, {
     headers: { ...tenantHeader(req) },
-    next: { revalidate: 30 },
+    cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.status });

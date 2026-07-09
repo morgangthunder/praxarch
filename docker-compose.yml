@@ -77,7 +77,7 @@ services:
     restart: unless-stopped
     # nodemon (legacy polling) detects host edits through the bind mount and
     # restarts Nest — reliable hot reload on Windows/macOS. See apps/api/nodemon.json.
-    command: ["npm", "run", "start:docker"]
+    command: ["npm", "run", "start:prod"]
     environment:
       PORT: 3901
       NODE_ENV: development
@@ -106,6 +106,10 @@ services:
       GROK_API_KEY: ${GROK_API_KEY:-}
       GROK_API_URL: ${GROK_API_URL:-https://api.x.ai/v1}
       GROK_MODEL: ${GROK_MODEL:-grok-2-latest}
+      # One-button ECR builds (optional): Bubblbook repo on host + AWS profile
+      BUBBLBOOK_REPO_MOUNT: /bubblbook-src
+      AWS_PROFILE: ${AWS_PROFILE:-bubblbook-dev}
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
     ports:
       - "3901:3901"
     # Lets the API reach a local Coolify running in a WSL2 distro on the host.
@@ -114,6 +118,9 @@ services:
     volumes:
       - ./apps/api:/app
       - praxarch_api_node_modules:/app/node_modules
+      - ${BUBBLBOOK_REPO_HOST_PATH:-./.build-stub}:/bubblbook-src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AWS_CONFIG_HOST_PATH:-${USERPROFILE}/.aws}:/root/.aws:ro
     depends_on:
       postgres:
         condition: service_healthy

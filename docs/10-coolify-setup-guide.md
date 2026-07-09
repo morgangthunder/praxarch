@@ -180,8 +180,70 @@ With `DEPLOY_DRIVER=simulate` (default):
 
 ## Troubleshooting
 
+### `localhost:8000` refused to connect (local WSL2 Coolify)
+
+Coolify runs in the **`Ubuntu-24.04` WSL2 distro**, which **stops when idle**. Windows
+cannot forward port 8000 until that distro is running.
+
+**Quick fix — run from the repo (open browser immediately after):**
+
+```powershell
+.\scripts\start-coolify.ps1
+```
+
+`start-coolify.ps1` auto-starts a WSL keepalive so `Ubuntu-24.04` does not go
+**Stopped** (which causes `127.0.0.1 refused to connect` seconds later).
+
+**Stay running (one-time setup):**
+
+```powershell
+.\scripts\install-coolify-autostart.ps1
+```
+
+This registers Windows tasks: start Coolify at **logon**, WSL **sleep infinity**
+keepalive, and health check **every 2 min**.
+
+`%USERPROFILE%\.wslconfig` should include:
+
+```ini
+[wsl2]
+vmIdleTimeout=-1
+localhostForwarding=true
+networkingMode=mirrored
+```
+
+**Apply once after editing:** `wsl --shutdown`, then restart Docker Desktop, then
+`.\scripts\start-coolify.ps1`. The script only reports ready when **Windows** can reach
+`http://127.0.0.1:8000` (not just inside WSL).
+
+**Use `127.0.0.1`, not `localhost`:** On WSL2, `http://localhost:8000` often fails
+(IPv6 `::1` does not forward to WSL). Use:
+
+`http://127.0.0.1:8000/register`
+
+Run `.\scripts\fix-coolify-url.ps1` once so Coolify redirects stay on `127.0.0.1:8000`.
+
+Check: `wsl -l -v` — `Ubuntu-24.04` should show **Running**, not Stopped.
+
+**Docker failed to start inside `Ubuntu-24.04`** (orphan `dockerd` from an old
+`/etc/wsl.conf` `command=service docker start` line):
+
+```powershell
+wsl -d Ubuntu-24.04 -u root -e bash /mnt/c/Morgan/Coding/Praxarch/scripts/coolify-wake.sh
+```
+
+`/etc/wsl.conf` should contain only `systemd=true` under `[boot]` — **not** a
+`command=` line. Systemd owns `docker.service`.
+
+First cold start after `wsl --shutdown` can take **60–120s**; `start-coolify.ps1`
+waits up to 180s.
+
 | Symptom | Fix |
 |---|---|
+| `localhost:8000` connection refused | Run `.\scripts\start-coolify.ps1`; wait up to 180s on cold boot |
+| Register redirects to `localhost` (no port) | Coolify `APP_URL` wrong — run `fix-coolify-url.sh` (sets `http://localhost:8000`) |
+| `docker.service: Failed` / fatal signal | Run `.\scripts\start-coolify.ps1` again — wake script waits if docker is activating (do not kill dockerd manually) |
+| `docker.service: Failed` / orphan PID | Run `coolify-wake.sh` (kills orphan dockerd, resets systemd) |
 | `Deploy not configured` | Missing `COOLIFY_APP_*` env for that project+environment |
 | `502` from API | Wrong `COOLIFY_API_URL`, token, or app UUID |
 | UI stuck on Queued | API can't reach Coolify; check network/firewall; polling logs in `docker compose logs api` |

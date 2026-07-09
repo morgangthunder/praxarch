@@ -1,0 +1,129 @@
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { CoolifyApiClient } from "./coolify-api.client";
+import { CoolifyServersService } from "./coolify-servers.service";
+import { DeployTargetsService } from "./deploy-targets.service";
+import { resolveProfileOptions } from "./compose-build-profiles";
+import { runSshCommand } from "./remote-ssh.util";
+
+/** Remote fixes after a successful Coolify compose deploy (tenant-specific hooks). */
+@Injectable()
+export class ProdPostDeployService {
+  private readonly logger = new Logger(ProdPostDeployService.name);
+
+  constructor(
+    private readonly deployTargets: DeployTargetsService,
+    private readonly coolify: CoolifyApiClient,
+    private readonly servers: CoolifyServersService
+  ) {}
+
+  /**
+   * Run post-deploy hooks when Coolify reports success.
+   * Currently: pin Mongo to a known data volume + reconnect MCP bridge networks.
+   */
+  async afterCoolifySuccess(
+    tenantId: string,
+    serviceId: string,
+    environment: "staging" | "production"
+  ): Promise<void> {
+    const target = await this.deployTargets.get(tenantId, serviceId, environment);
+    if (!target) return;
+
+    const opts = resolveProfileOptions(target.deployProfileOptions);
+    const mongoVol = opts.mongoDataVolume?.trim();
+    if (!mongoVol || !target.coolifyAppUuid || !target.coolifyServerUuid) return;
+
+    const composeDir = `/data/coolify/applications/${target.coolifyAppUuid}`;
+    const appUuid = target.coolifyAppUuid;
+
+    try {
+      const { host, port, user, privateKey } = await this.sshTarget(
+        target.coolifyServerUuid,
+        tenantId
+      );
+      const script = buildPostDeployScript({ composeDir, appUuid, mongoVol });
+      const result = await runSshCommand({
+        host,
+        port,
+        user,
+        privateKey,
+        command: script,
+        timeoutMs: 120_000,
+      });
+      const tail = (result.stdout || result.stderr).trim().split("\n").slice(-8).join("\n");
+      this.logger.log(
+        `Post-deploy hooks for ${tenantId}/${serviceId}/${environment}:\n${tail}`
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Post-deploy hooks failed for ${tenantId}/${serviceId}/${environment}: ${(err as Error).message}`
+      );
+    }
+  }
+
+  private async sshTarget(uuid: string, tenantId: string) {
+    const raw = await this.coolify.getServer(uuid);
+    if (!this.servers.isVisibleToTenant(raw, tenantId)) {
+      throw new NotFoundException("Server not found for this tenant");
+    }
+    const privateKey = await this.coolify.getServerPrivateKeyMaterial(uuid);
+    if (!privateKey) throw new NotFoundException("SSH key not available for server");
+    return {
+      host: raw.ip ?? "",
+      port: (raw as { port?: number }).port ?? 22,
+      user: (raw as { user?: string }).user ?? "root",
+      privateKey,
+    };
+  }
+}
+
+function buildPostDeployScript(input: {
+  composeDir: string;
+  appUuid: string;
+  mongoVol: string;
+}): string {
+  const mongoFix = `services:
+  mongo:
+    container_name: mongo-latest
+    image: mongo:7
+    restart: always
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+volumes:
+  mongo_data:
+    external: true
+    name: ${input.mongoVol}
+`;
+
+  const mongoFixB64 = Buffer.from(mongoFix).toString("base64");
+
+  return [
+    "set -e",
+    `cd "${input.composeDir}"`,
+    "docker network inspect coolify >/dev/null 2>&1 || sudo docker network create coolify",
+    `echo '${mongoFixB64}' | base64 -d > docker-compose.mongo-fix.yml`,
+    `sudo docker stop $(docker ps -q -f name=mongo-${input.appUuid}) 2>/dev/null || true`,
+    `sudo docker rm $(docker ps -aq -f name=mongo-${input.appUuid}) 2>/dev/null || true`,
+    'MOUNT=$(docker inspect mongo-latest --format "{{range .Mounts}}{{.Name}}{{end}}" 2>/dev/null || echo "")',
+    `if echo "$MOUNT" | grep -q "${input.mongoVol}"; then echo mongo_ok; else`,
+    "  sudo docker stop mongo-latest 2>/dev/null || true",
+    "  sudo docker rm mongo-latest 2>/dev/null || true",
+    "  sudo docker compose -f docker-compose.yml -f docker-compose.mongo-fix.yml up -d mongo",
+    "fi",
+    "sleep 5",
+    'APP=$(docker ps --format "{{.Names}}" | grep -E "^(app-|work-)" | head -1)',
+    'MCP_NET=$(docker inspect mcp-server --format "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}" 2>/dev/null | awk "{print \\$1}")',
+    'APP_NET=$(docker inspect "$APP" --format "{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}" 2>/dev/null | awk "{print \\$1}")',
+    'test -n "$APP" && test -n "$MCP_NET" && docker network inspect "$MCP_NET" --format "{{range .Containers}}{{.Name}} {{end}}" | grep -q "$APP" || docker network connect "$MCP_NET" "$APP" 2>/dev/null || true',
+    'test -n "$APP_NET" && docker network inspect "$APP_NET" --format "{{range .Containers}}{{.Name}} {{end}}" | grep -q mcp-server || docker network connect "$APP_NET" mcp-server 2>/dev/null || true',
+    'docker exec mongo-latest mongosh --quiet bubblbook --eval "printjson({users:db.users.countDocuments()})" 2>/dev/null || true',
+    "curl -sf -o /dev/null -w 'post_deploy_http=%{http_code}\\n' --max-time 8 http://127.0.0.1:3300/ || true",
+  ].join("\n");
+}

@@ -10,6 +10,7 @@ RUN npm install
 
 # ── Development target (used by docker-compose) ──
 FROM node:20-alpine AS dev
+RUN apk add --no-cache openssh-client openssh-keygen docker-cli aws-cli
 WORKDIR /app
 ENV NODE_ENV=development
 COPY --from=deps /app/node_modules ./node_modules
@@ -26,6 +27,7 @@ RUN npm run build
 
 # ── Production runtime ──
 FROM node:20-alpine AS prod
+RUN apk add --no-cache openssh-client openssh-keygen
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json ./

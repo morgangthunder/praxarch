@@ -91,6 +91,18 @@ export const MOCK_TENANTS: Tenant[] = [
     marginPct: 49,
     entitlements: { tier: "growth", overrides: { deployments: false } },
   },
+  // Real client workspace: Growth tier with Deployments; starts with no services.
+  {
+    id: "t_bubblbook",
+    name: "Bubblbook",
+    slug: "bubblbook",
+    autonomy: "APPROVAL_REQUIRED",
+    status: "active",
+    activeAgents: 0,
+    monthlySpendEur: 0,
+    marginPct: 0,
+    entitlements: { tier: "growth", overrides: {} },
+  },
 ];
 
 export function getTenant(slug: string): Tenant | undefined {
@@ -409,6 +421,7 @@ const SERVICES_BY_TENANT: Record<string, DeployService[]> = {
       ],
     },
   ],
+  bubblbook: [],
   northwind: [
     {
       id: "marketing",

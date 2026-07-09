@@ -21,19 +21,25 @@ interface AssistantContextValue {
   setOpen: (v: boolean) => void;
   messages: AssistantMessage[];
   streaming: boolean;
-  /** Open the panel and send a message. */
-  ask: (text: string) => void;
+  /**
+   * Open the panel and send a message. `text` is what the user sees in chat;
+   * `extraContext` is sent to the API only (system context block) — never rendered.
+   */
+  ask: (text: string, extraContext?: Record<string, string>) => void;
   /** Send within the current open session. */
-  send: (text: string) => void;
+  send: (text: string, extraContext?: Record<string, string>) => void;
 }
 
 const Ctx = createContext<AssistantContextValue | null>(null);
 
 export function AssistantProvider({
   tenantSlug,
+  role,
   children,
 }: {
   tenantSlug: string;
+  /** Current "View as" identity, forwarded so the assistant knows the caller's role. */
+  role?: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -45,7 +51,7 @@ export function AssistantProvider({
   const currentModule = pathname?.split("/")[3]; // /app/[tenant]/<module>
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, extraContext?: Record<string, string>) => {
       const trimmed = text.trim();
       if (!trimmed || streamingRef.current) return;
       streamingRef.current = true;
@@ -61,7 +67,10 @@ export function AssistantProvider({
         const res = await fetch("/api/bff/assistant/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-praxarch-tenant": tenantSlug },
-          body: JSON.stringify({ messages: history, context: { module: currentModule, route: pathname } }),
+          body: JSON.stringify({
+            messages: history,
+            context: { role, module: currentModule, route: pathname, ...extraContext },
+          }),
         });
         if (!res.body) throw new Error("No stream");
 
@@ -89,13 +98,13 @@ export function AssistantProvider({
         setStreaming(false);
       }
     },
-    [messages, tenantSlug, currentModule, pathname]
+    [messages, tenantSlug, role, currentModule, pathname]
   );
 
   const ask = useCallback(
-    (text: string) => {
+    (text: string, extraContext?: Record<string, string>) => {
       setOpen(true);
-      void send(text);
+      void send(text, extraContext);
     },
     [send]
   );

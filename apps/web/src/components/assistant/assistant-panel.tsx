@@ -5,6 +5,7 @@ import { Bot, Send, Sparkles, X } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { useAssistant } from "./assistant-context";
+import { AssistantMarkdown } from "./assistant-markdown";
 
 /** Top-bar button that opens the assistant. Cmd/Ctrl+J also toggles it. */
 export function AssistantLauncher() {
@@ -54,7 +55,7 @@ export function AssistantPanel() {
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-border-strong bg-surface-raised shadow-2xl">
+    <div className="fixed inset-y-0 right-0 z-[60] flex w-full max-w-md flex-col border-l border-border-strong bg-surface-raised shadow-2xl">
       <header className="flex h-14 items-center justify-between border-b border-border-subtle px-4">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-status-pending" />
@@ -87,7 +88,15 @@ export function AssistantPanel() {
                   : "border-border-subtle bg-surface-base text-content-secondary"
               )}
             >
-              {m.content || (streaming ? "…" : "")}
+              {m.role === "assistant" ? (
+                m.content ? (
+                  <AssistantMarkdown content={m.content} />
+                ) : streaming ? (
+                  <span className="text-content-muted">…</span>
+                ) : null
+              ) : (
+                m.content
+              )}
             </div>
             {m.tools?.map((t, i) => (
               <div

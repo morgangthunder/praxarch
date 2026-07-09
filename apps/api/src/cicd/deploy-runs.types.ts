@@ -9,7 +9,7 @@ export interface DeployRunRecord {
   status: DeployRunStatus;
   tag: string;
   actor: string;
-  driver: "simulate" | "coolify";
+  driver: "simulate" | "coolify" | "ssh-build" | "ecr-release";
   commitSha: string | null;
   errorMessage: string | null;
   createdAt: string;

@@ -34,15 +34,32 @@ import type { Request, Response } from "express";
 
 import { CicdService } from "./cicd.service";
 
+import { CoolifyServersService } from "./coolify-servers.service";
+import { ProvisionBundleService } from "./provision-bundle.service";
+
 import { DeployRunsService } from "./deploy-runs.service";
 
 import { ServicesService } from "./services.service";
 
 import { DeployRequestDto, DeployResult } from "./dto/deploy.dto";
 
+import { ProvisionDeploymentDto } from "./dto/provision.dto";
+
 import { CreateServiceDto, UpdateServiceDto } from "./dto/service.dto";
 
+import { CreateCoolifyServerDto } from "./dto/create-coolify-server.dto";
+
+import { VerifyGitHubAccessDto } from "./dto/verify-github.dto";
+
+import { ServiceBranchSyncService } from "./service-branch-sync.service";
+import { ServerPreflightService } from "./server-preflight.service";
+import { ReconcileServerDto } from "./dto/reconcile.dto";
+import { DeploymentWizardService } from "./deployment-wizard.service";
+import { UpdateDeploymentDto } from "./dto/update-deployment.dto";
+
 import { DeployServiceRecord } from "./services.types";
+
+import { GitHubService } from "../common/secrets/github.service";
 
 import { CurrentTenant, type TenantContext } from "../common/tenant/tenant-context";
 
@@ -58,9 +75,21 @@ export class CicdController {
 
     private readonly cicd: CicdService,
 
+    private readonly coolifyServers: CoolifyServersService,
+
+    private readonly provisionBundle: ProvisionBundleService,
+
     private readonly deployRuns: DeployRunsService,
 
     private readonly services: ServicesService,
+
+    private readonly branchSync: ServiceBranchSyncService,
+
+    private readonly github: GitHubService,
+
+    private readonly preflight: ServerPreflightService,
+
+    private readonly deploymentWizard: DeploymentWizardService,
 
     private readonly config: ConfigService
 
@@ -112,11 +141,122 @@ export class CicdController {
 
     if (!updated) throw new NotFoundException("Service not found");
 
+    await this.branchSync.syncBranches(tenant.tenantId, id, {
+      staging: dto.stagingBranch ?? dto.branch,
+      production: dto.productionBranch ?? dto.branch,
+    });
+
     return updated;
 
   }
 
 
+
+  /** Load wizard state for an existing deployment (edit mode). */
+  @Get("services/:id/wizard")
+  async getDeploymentWizard(
+    @Param("id") id: string,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.deploymentWizard.getConfig(tenant.tenantId, id);
+  }
+
+  /** Save wizard changes for an existing deployment. */
+  @Patch("services/:id/deployment")
+  async updateDeployment(
+    @Param("id") id: string,
+    @Body() dto: UpdateDeploymentDto,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.deploymentWizard.updateDeployment(tenant.tenantId, id, dto);
+  }
+
+
+
+  /** Deployment targets: tenant-registered servers + platform localhost. */
+  @Get("coolify/servers")
+  async listCoolifyServers(@CurrentTenant() tenant: TenantContext) {
+    return this.coolifyServers.listForTenant(tenant.tenantId);
+  }
+
+  /** Register an EC2 / remote server with Coolify (tenant never opens Coolify UI). */
+  @Post("coolify/servers")
+  @HttpCode(201)
+  async registerCoolifyServer(
+    @Body() dto: CreateCoolifyServerDto,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.coolifyServers.register(tenant.tenantId, dto);
+  }
+
+  @Get("coolify/servers/:uuid")
+  async getCoolifyServer(
+    @Param("uuid") uuid: string,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.coolifyServers.getStatus(uuid, tenant.tenantId);
+  }
+
+  /** Wizard gate — trigger SSH/Docker validation and wait for readiness. */
+  @Post("coolify/servers/:uuid/validate")
+  @HttpCode(200)
+  async validateCoolifyServer(
+    @Param("uuid") uuid: string,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.coolifyServers.validateAndWait(uuid, tenant.tenantId);
+  }
+
+  /**
+   * Read-only preflight scan — reports running containers, port/proxy holders,
+   * data volumes, and takeover conflicts. Never mutates the host.
+   */
+  @Post("coolify/servers/:uuid/preflight")
+  @HttpCode(200)
+  async preflightServer(
+    @Param("uuid") uuid: string,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.preflight.scan(uuid, tenant.tenantId);
+  }
+
+  /**
+   * Consent-gated reconciliation — stops/removes the legacy containers the caller
+   * approved (data volumes preserved) and optionally sets the Coolify proxy to none.
+   */
+  @Post("coolify/servers/:uuid/reconcile")
+  @HttpCode(200)
+  async reconcileServer(
+    @Param("uuid") uuid: string,
+    @Body() dto: ReconcileServerDto,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.preflight.reconcile(uuid, tenant.tenantId, {
+      stopContainers: dto.stopContainers,
+      setProxyNone: dto.setProxyNone,
+      retargetDeadNginxUpstreamsTo: dto.retargetDeadNginxUpstreamsTo,
+    });
+  }
+
+  /** Wizard Access step — confirm PAT can read the repo before provisioning. */
+  @Post("github/verify-access")
+  @HttpCode(200)
+  async verifyGitHubAccess(@Body() dto: VerifyGitHubAccessDto) {
+    return this.github.verifyRepoAccess(dto.repo, dto.githubToken);
+  }
+
+  /**
+   * Full wizard submit: create service + provision staging and production on
+   * separate Coolify servers (EC2, localhost, etc.).
+   */
+  @Post("provision")
+  @HttpCode(201)
+  async provisionDeployment(
+    @Body() dto: ProvisionDeploymentDto,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    return this.provisionBundle.provision(tenant.tenantId, dto);
+  }
 
   @Post("deploy")
 
@@ -135,6 +275,12 @@ export class CicdController {
   }
 
 
+
+  /** Recent deploy activity for the tenant (sidebar / audit). */
+  @Get("deploy-runs")
+  async listDeployRuns(@CurrentTenant() tenant: TenantContext) {
+    return this.deployRuns.listByTenant(tenant.tenantId, 25);
+  }
 
   /** Current status of a deploy run (polling fallback). */
 

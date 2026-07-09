@@ -1,24 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, AppWindow, MessageCircle, Settings2 } from "lucide-react";
+import { Boxes, AppWindow, MessageCircle, Settings2, Wand2 } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useWorkspace } from "@/components/workspace-context";
 import { useDeployStream, type DeployRunStatus } from "@/lib/use-deploy-stream";
 import type { AgentStatus, DeployEnvironment, DeployService, ServiceEnvironment } from "@/lib/types";
+import { formatDeployTimestamp } from "@/lib/utils";
 
 type ActionState = { kind: "idle" | "busy" | "done" | "error" | "requested"; msg?: string };
-
-function shortDate(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function runStatusToAgent(status: DeployRunStatus): AgentStatus {
   if (status === "success") return "active";
@@ -33,11 +25,13 @@ export function ServiceCard({
   service,
   tenantSlug,
   onConfigure,
+  onManageDeployment,
   onServiceUpdate,
 }: {
   service: DeployService;
   tenantSlug: string;
   onConfigure?: () => void;
+  onManageDeployment?: () => void;
   onServiceUpdate?: (updated: DeployService) => void;
 }) {
   const { can } = useWorkspace();
@@ -114,8 +108,8 @@ export function ServiceCard({
     setActiveEnv(null);
   }, [done, run, activeEnv, onServiceUpdate]);
 
-  async function deploy(environment: DeployEnvironment) {
-    setState({ kind: "busy", msg: environment === "production" ? "Promoting…" : "Deploying…" });
+  async function deploy(environment: DeployEnvironment, ref?: string) {
+    setState({ kind: "busy", msg: environment === "production" ? "Deploying production…" : "Deploying…" });
     setActiveEnv(environment);
     try {
       const res = await fetch("/api/bff/cicd/deploy", {
@@ -128,12 +122,13 @@ export function ServiceCard({
           project: `${tenantSlug}-${localService.id}`,
           environment,
           serviceId: localService.id,
+          ...(ref ? { ref } : {}),
         }),
       });
       if (!res.ok) throw new Error(`Rejected (${res.status})`);
       const data = (await res.json()) as { deploymentId: string };
       setDeploymentId(data.deploymentId);
-      setState({ kind: "busy", msg: "Queued…" });
+      setState({ kind: "busy", msg: "Starting…" });
     } catch (err) {
       setActiveEnv(null);
       setState({ kind: "error", msg: err instanceof Error ? err.message : "Failed" });
@@ -178,6 +173,15 @@ export function ServiceCard({
             {localService.kind}
           </span>
           <span className="ml-auto font-mono text-[11px] text-content-muted">{localService.repo}</span>
+          {onManageDeployment && (
+            <button
+              onClick={onManageDeployment}
+              title="Manage deployment setup (wizard)"
+              className="rounded-md p-1 text-content-muted transition-colors hover:bg-surface-base hover:text-content-secondary"
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+            </button>
+          )}
           {onConfigure && (
             <button
               onClick={onConfigure}
@@ -206,12 +210,23 @@ export function ServiceCard({
             </Button>
           )}
 
+          {can("promote_prod") && prodRow && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => deploy("production", prodRow.branch)}
+              disabled={state.kind === "busy"}
+            >
+              Deploy production
+            </Button>
+          )}
+
           {promoteAvailable ? (
             can("promote_prod") ? (
               <Button
-                variant="primary"
+                variant="secondary"
                 size="sm"
-                onClick={() => deploy("production")}
+                onClick={() => deploy("production", stagingRow?.branch)}
                 disabled={state.kind === "busy"}
               >
                 Promote → production
@@ -275,7 +290,9 @@ function EnvRow({ env }: { env: ServiceEnvironment }) {
           ahead
         </span>
       )}
-      <span className="ml-auto shrink-0 text-[11px] text-content-muted">{shortDate(env.deployedAt)}</span>
+      <span className="ml-auto shrink-0 text-[11px] text-content-muted">
+        {formatDeployTimestamp(env.deployedAt)}
+      </span>
     </div>
   );
 }

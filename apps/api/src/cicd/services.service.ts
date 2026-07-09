@@ -2,6 +2,11 @@ import { Injectable, Logger } from "@nestjs/common";
 import { DatabaseService } from "../common/database/database.service";
 import { DeployServiceRecord, ServiceEnvironment } from "./services.types";
 import { CreateServiceDto, UpdateServiceDto } from "./dto/service.dto";
+import {
+  DEFAULT_PRODUCTION_BRANCH,
+  DEFAULT_STAGING_BRANCH,
+  resolveEnvironmentBranches,
+} from "./branch-defaults";
 
 interface ServiceRow {
   id: string;
@@ -12,12 +17,15 @@ interface ServiceRow {
 }
 
 /** Builds the standard prod+staging environment pair for a new service. */
-function freshEnvironments(branch: string): ServiceEnvironment[] {
+function freshEnvironments(
+  stagingBranch = DEFAULT_STAGING_BRANCH,
+  productionBranch = DEFAULT_PRODUCTION_BRANCH
+): ServiceEnvironment[] {
   const now = new Date().toISOString();
-  const base = { branch, commit: "—", version: "v0.0.0", status: "idle", deployedAt: now };
+  const base = { commit: "—", version: "v0.0.0", status: "idle" as const, deployedAt: now };
   return [
-    { environment: "production", ...base },
-    { environment: "staging", ...base },
+    { environment: "production", branch: productionBranch, ...base },
+    { environment: "staging", branch: stagingBranch, ...base },
   ];
 }
 
@@ -70,7 +78,9 @@ export class ServicesService {
     );
     if (rows.length > 0) return rows.map(this.toRecord);
 
-    // Lazy seed so the view has demo data the first time, then it's mutable.
+    // Demo seed only for the acme sandbox tenant — real clients start empty.
+    if (tenantId !== "acme") return [];
+
     const seeded = defaultServices(tenantId);
     for (const s of seeded) await this.insert(tenantId, s);
     this.logger.log(`Seeded ${seeded.length} default services for ${tenantId}`);
@@ -81,12 +91,13 @@ export class ServicesService {
     const id =
       (dto.name || "web-app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") ||
       `svc-${Date.now()}`;
+    const branches = resolveEnvironmentBranches(dto);
     const record: DeployServiceRecord = {
       id,
       name: dto.name,
       repo: dto.repo,
       kind: dto.kind ?? "app",
-      environments: freshEnvironments(dto.branch ?? "main"),
+      environments: freshEnvironments(branches.staging, branches.production),
     };
     await this.insert(tenantId, record);
     this.logger.log(`Created service ${tenantId}/${id}`);
@@ -107,16 +118,24 @@ export class ServicesService {
     const current = this.toRecord(rows[0]);
 
     const repo = dto.repo ?? current.repo;
-    const environments = dto.branch
-      ? current.environments.map((e) => ({ ...e, branch: dto.branch as string }))
-      : current.environments;
+    const name = dto.name ?? current.name;
+    const environments = current.environments.map((e) => {
+      const branch =
+        e.environment === "staging"
+          ? (dto.stagingBranch ?? dto.branch)
+          : e.environment === "production"
+            ? (dto.productionBranch ?? dto.branch)
+            : undefined;
+      if (branch !== undefined) return { ...e, branch };
+      return e;
+    });
 
     await this.db.query(
-      `UPDATE public.deploy_services SET repo = $3, environments = $4
+      `UPDATE public.deploy_services SET name = $3, repo = $4, environments = $5
        WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, id, repo, JSON.stringify(environments)]
+      [tenantId, id, name, repo, JSON.stringify(environments)]
     );
-    return { ...current, repo, environments };
+    return { ...current, name, repo, environments };
   }
 
   /**

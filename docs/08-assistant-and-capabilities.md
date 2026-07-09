@@ -49,6 +49,7 @@ catalogue lives in [capability.definitions.ts](apps/api/src/capabilities/capabil
 |---|---|---|---|
 | `deployments.listServices` | query | low | `ServicesService.list` |
 | `deployments.createService` | command | medium | `ServicesService.create` |
+| `deployments.provisionService` | command | high | `CoolifyProvisioningService.provision` (owner role; creates Coolify app + `deploy_targets` row) |
 | `deployments.updateServiceConfig` | command | medium | `ServicesService.updateConfig` |
 | `deployments.deployStaging` | command | medium | `CicdService.deploy` (staging) |
 | `deployments.promoteProduction` | command | high | `CicdService.deploy` (prod) **or** WhatsApp HITL |

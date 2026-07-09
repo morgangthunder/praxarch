@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { TenantEntitlementsManager } from "@/components/admin/tenant-entitlements";
+import { TenantWorkspaceSwitcher } from "@/components/admin/tenant-workspace-switcher";
 import { MODULES, PLANS, TIER_ORDER, tierIncludes } from "@/lib/modules";
 import { MOCK_TENANTS } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
@@ -73,15 +73,20 @@ export default function TenantsAdminPage() {
         </div>
       </section>
 
+      <section className="mb-8">
+        <h2 className="mb-2.5 text-xs font-medium uppercase tracking-wide text-content-muted">
+          Open workspace
+        </h2>
+        <p className="mb-3 text-sm text-content-secondary">
+          Jump into a tenant&apos;s product interface — use Deployments for Bubblbook staging/prod setup.
+        </p>
+        <TenantWorkspaceSwitcher tenants={MOCK_TENANTS} />
+      </section>
+
       <section>
-        <div className="mb-2.5 flex items-center justify-between">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-content-muted">
-            Tenant access
-          </h2>
-          <Link href="/app/acme" className="text-xs text-status-info hover:underline">
-            View Acme workspace (max access) →
-          </Link>
-        </div>
+        <h2 className="mb-2.5 text-xs font-medium uppercase tracking-wide text-content-muted">
+          Tenant access
+        </h2>
         <TenantEntitlementsManager tenants={MOCK_TENANTS} />
       </section>
     </>
