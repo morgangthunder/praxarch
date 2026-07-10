@@ -6,6 +6,8 @@ import {
 
   Get,
 
+  BadRequestException,
+
   Headers,
 
   HttpCode,
@@ -25,6 +27,8 @@ import {
   Res,
 
   UnauthorizedException,
+
+  Query,
 
 } from "@nestjs/common";
 
@@ -169,6 +173,20 @@ export class CicdController {
     @CurrentTenant() tenant: TenantContext
   ) {
     return this.deploymentWizard.updateDeployment(tenant.tenantId, id, dto);
+  }
+
+  /** GitHub Actions image-build status for the latest commit on an environment branch. */
+  @Get("services/:id/ci-readiness")
+  async getCiReadiness(
+    @Param("id") id: string,
+    @Query("environment") environment: string,
+    @Query("ref") ref: string | undefined,
+    @CurrentTenant() tenant: TenantContext
+  ) {
+    if (environment !== "staging" && environment !== "production") {
+      throw new BadRequestException("environment must be staging or production");
+    }
+    return this.cicd.getCiReadiness(tenant.tenantId, id, environment, ref);
   }
 
 

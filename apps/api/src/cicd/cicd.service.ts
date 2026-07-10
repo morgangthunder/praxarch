@@ -17,6 +17,7 @@ import { ServicesService } from "./services.service";
 import { DeploymentComposeService, type SourceDeployHandle } from "./deployment-compose.service";
 import { ProdPostDeployService } from "./prod-post-deploy.service";
 import { EcrReleaseService } from "./ecr-release.service";
+import { EcrCiReadinessService, type CiReadinessResult } from "./ecr-ci-readiness.service";
 
 import { isSourceBuildProfile, normalizeDeployProfile } from "./compose-build-profiles";
 
@@ -65,7 +66,9 @@ export class CicdService {
 
     private readonly prodPostDeploy: ProdPostDeployService,
 
-    private readonly ecrRelease: EcrReleaseService
+    private readonly ecrRelease: EcrReleaseService,
+
+    private readonly ecrCiReadiness: EcrCiReadinessService
 
   ) {}
 
@@ -79,6 +82,30 @@ export class CicdService {
 
     return this.triggerDeploy(dto, tenant.tenantId, tenant.accountId);
 
+  }
+
+  /** Whether GitHub Actions has built a container image for the latest commit on this branch. */
+  async getCiReadiness(
+    tenantId: string,
+    serviceId: string,
+    environment: "staging" | "production",
+    ref?: string
+  ): Promise<CiReadinessResult> {
+    const target = await this.deployTargets.get(tenantId, serviceId, environment);
+    const service = await this.services.get(tenantId, serviceId);
+    const repo = target?.repo ?? service?.repo;
+    if (!repo) {
+      return { state: "skipped", reason: "no_workflow" };
+    }
+    const deployProfile = normalizeDeployProfile(target?.deployProfile);
+    if (isSourceBuildProfile(deployProfile)) {
+      return { state: "skipped", reason: "no_workflow" };
+    }
+    const branch = ref?.trim() || target?.branch || service?.environments.find((e) => e.environment === environment)?.branch;
+    if (!branch) {
+      return { state: "skipped", reason: "no_workflow" };
+    }
+    return this.ecrCiReadiness.check(tenantId, repo, branch);
   }
 
 
@@ -193,6 +220,17 @@ export class CicdService {
       serviceId != null ? await this.deployTargets.get(tenantId, serviceId, dto.environment) : null;
 
     const deployProfile = normalizeDeployProfile(target?.deployProfile);
+
+    if (target?.repo && !isSourceBuildProfile(deployProfile)) {
+      const branch = dto.ref?.trim() || target.branch;
+      const readiness = await this.ecrCiReadiness.check(tenantId, target.repo, branch);
+      if (readiness.state === "blocked") {
+        throw new HttpException(
+          { message: readiness.message, ci: readiness },
+          HttpStatus.CONFLICT
+        );
+      }
+    }
 
     if (serviceId) {
       try {

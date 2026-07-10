@@ -17,6 +17,7 @@ import { DeploymentDiagnoseService } from "./deployment-diagnose.service";
 import { DeploymentComposeService } from "./deployment-compose.service";
 import { ProdPostDeployService } from "./prod-post-deploy.service";
 import { EcrReleaseService } from "./ecr-release.service";
+import { EcrCiReadinessService } from "./ecr-ci-readiness.service";
 
 @Module({
   imports: [SecretsModule],
@@ -38,6 +39,7 @@ import { EcrReleaseService } from "./ecr-release.service";
     DeploymentComposeService,
     ProdPostDeployService,
     EcrReleaseService,
+    EcrCiReadinessService,
   ],
   exports: [
     CicdService,
@@ -56,6 +58,7 @@ import { EcrReleaseService } from "./ecr-release.service";
     DeploymentComposeService,
     ProdPostDeployService,
     EcrReleaseService,
+    EcrCiReadinessService,
   ],
 })
 export class CicdModule {}
