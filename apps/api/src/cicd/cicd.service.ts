@@ -210,6 +210,18 @@ export class CicdService {
       await this.prodPostDeploy.ensureCoolifyNetwork(tenantId, target.coolifyServerUuid);
     }
 
+    // Pre-deploy guard: if the compose pulls an ECR image, log the server in to
+    // that registry first (only when the server's own AWS account owns the
+    // registry — cross-account prod pulls are left untouched). Prevents
+    // "no basic auth credentials" on `docker compose up`.
+    if (target?.coolifyServerUuid && target.coolifyAppUuid) {
+      await this.prodPostDeploy.ensureEcrLogin(
+        tenantId,
+        target.coolifyServerUuid,
+        target.coolifyAppUuid
+      );
+    }
+
     if (target && isSourceBuildProfile(deployProfile)) {
       const branch = dto.ref?.trim() || target.branch;
       const deploymentId = `ssh-${randomUUID()}`;

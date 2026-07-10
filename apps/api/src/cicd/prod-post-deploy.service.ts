@@ -86,6 +86,50 @@ export class ProdPostDeployService {
     }
   }
 
+  /**
+   * Pre-deploy guard: if the target's compose pulls an image from ECR, make sure
+   * the server is logged in to that registry before Coolify runs `docker compose
+   * up` (otherwise the pull fails with "no basic auth credentials").
+   *
+   * Safe for cross-account setups: it only performs `docker login` when the
+   * server's OWN AWS account (via `sts get-caller-identity`) matches the ECR
+   * registry account. A prod box pulling a different account's image (granted via
+   * repo policy) is left untouched. Best-effort — never blocks the deploy.
+   */
+  async ensureEcrLogin(
+    tenantId: string,
+    serverUuid: string,
+    appUuid: string
+  ): Promise<"ok" | "skipped" | "failed"> {
+    try {
+      const { host, port, user, privateKey } = await this.sshTarget(serverUuid, tenantId);
+      const composeDir = `/data/coolify/applications/${appUuid}`;
+      const script = [
+        `REG=$(grep -oE '[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com' ${composeDir}/docker-compose.yml 2>/dev/null | head -1)`,
+        '[ -z "$REG" ] && echo NO_ECR && exit 0',
+        "ACCT=$(echo \"$REG\" | grep -oE '^[0-9]{12}')",
+        "REGION=$(echo \"$REG\" | sed -E 's/^[0-9]+\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com/\\1/')",
+        "MYACCT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)",
+        '[ -z "$MYACCT" ] && echo ECR_NO_AWS_CREDS && exit 0',
+        '[ "$ACCT" != "$MYACCT" ] && echo ECR_SKIP_XACCT && exit 0',
+        // Coolify runs `sudo docker compose up`, so the pull happens as root —
+        // log in with sudo so the token lands in root's docker config, not the
+        // SSH user's (whose credential store may be "not implemented").
+        'aws ecr get-login-password --region "$REGION" | sudo docker login --username AWS --password-stdin "$REG" >/dev/null 2>&1 && echo ECR_LOGIN_OK || echo ECR_LOGIN_FAIL',
+      ].join("\n");
+      const result = await runSshCommand({ host, port, user, privateKey, command: script, timeoutMs: 45_000 });
+      const out = (result.stdout || result.stderr).trim();
+      const last = out.split("\n").pop() ?? out;
+      this.logger.log(`ensureEcrLogin ${serverUuid} (${appUuid}): ${last}`);
+      if (last.includes("ECR_LOGIN_OK")) return "ok";
+      if (last.includes("ECR_LOGIN_FAIL")) return "failed";
+      return "skipped";
+    } catch (err) {
+      this.logger.warn(`ensureEcrLogin failed for ${serverUuid}: ${(err as Error).message}`);
+      return "failed";
+    }
+  }
+
   private async sshTarget(uuid: string, tenantId: string) {
     const raw = await this.coolify.getServer(uuid);
     if (!this.servers.isVisibleToTenant(raw, tenantId)) {
