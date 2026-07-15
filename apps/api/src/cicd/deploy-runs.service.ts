@@ -35,11 +35,12 @@ export class DeployRunsService {
     tag: string;
     actor: string;
     driver: "simulate" | "coolify" | "ssh-build" | "ecr-release";
+    commitSha?: string;
   }): Promise<DeployRunRecord> {
     const rows = await this.db.query<DeployRunRow>(
       `INSERT INTO public.deploy_runs
-         (id, tenant_id, project, service_id, environment, status, tag, actor, driver)
-       VALUES ($1,$2,$3,$4,$5,'queued',$6,$7,$8)
+         (id, tenant_id, project, service_id, environment, status, tag, actor, driver, commit_sha)
+       VALUES ($1,$2,$3,$4,$5,'queued',$6,$7,$8,$9)
        RETURNING *`,
       [
         input.id,
@@ -50,6 +51,7 @@ export class DeployRunsService {
         input.tag,
         input.actor,
         input.driver,
+        input.commitSha ?? null,
       ]
     );
     const run = this.toRecord(rows[0]);

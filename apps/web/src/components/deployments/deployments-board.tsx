@@ -45,11 +45,19 @@ export function DeploymentsBoard({
     let cancelled = false;
     setHydrating(true);
     setLoadError(null);
-    clientGet<DeployService[]>("/api/bff/cicd/services", tenantSlug, { skipCache: true })
+    clientGet<DeployService[]>("/api/bff/cicd/services", tenantSlug, {
+      skipCache: true,
+      timeoutMs: 25_000,
+      retries: 2,
+    })
       .then((data) => {
         if (cancelled) return;
-        if (Array.isArray(data)) setServices(data);
-        else setLoadError("Could not load services — try refreshing.");
+        if (Array.isArray(data)) {
+          setServices(data);
+          setLoadError(null);
+        } else {
+          setLoadError("Could not load services — try refreshing.");
+        }
       })
       .catch(() => {
         if (!cancelled) setLoadError("Could not load services — try refreshing.");

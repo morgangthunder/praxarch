@@ -64,12 +64,27 @@ export class CoolifyApiClient {
     };
     const timeoutMs = init?.timeoutMs ?? 30_000;
     const { timeoutMs: _t, json, ...rest } = init ?? {};
-    const res = await fetch(`${this.baseUrl()}${path}`, {
-      ...rest,
-      headers,
-      body: json !== undefined ? JSON.stringify(json) : rest.body,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl()}${path}`, {
+        ...rest,
+        headers,
+        body: json !== undefined ? JSON.stringify(json) : rest.body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Coolify ${init?.method ?? "GET"} ${path} → network error: ${detail}`);
+      throw new HttpException(
+        {
+          message:
+            "Deploy did not start — Praxarch cannot reach the Coolify API. " +
+            "Check COOLIFY_API_URL from the API container and try again.",
+          detail,
+        },
+        HttpStatus.BAD_GATEWAY
+      );
+    }
     const text = await res.text().catch(() => "");
     if (!res.ok) {
       this.logger.error(`Coolify ${init?.method ?? "GET"} ${path} → ${res.status}: ${text}`);

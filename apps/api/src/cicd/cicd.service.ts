@@ -18,8 +18,9 @@ import { DeploymentComposeService, type SourceDeployHandle } from "./deployment-
 import { ProdPostDeployService } from "./prod-post-deploy.service";
 import { EcrReleaseService } from "./ecr-release.service";
 import { EcrCiReadinessService, type CiReadinessResult } from "./ecr-ci-readiness.service";
+import { CoolifyServersService } from "./coolify-servers.service";
 
-import { isSourceBuildProfile, normalizeDeployProfile } from "./compose-build-profiles";
+import { isSourceBuildProfile, normalizeDeployProfile, resolveProfileOptions } from "./compose-build-profiles";
 
 import type { DeployRunStatus } from "./deploy-runs.types";
 
@@ -68,7 +69,9 @@ export class CicdService {
 
     private readonly ecrRelease: EcrReleaseService,
 
-    private readonly ecrCiReadiness: EcrCiReadinessService
+    private readonly ecrCiReadiness: EcrCiReadinessService,
+
+    private readonly coolifyServers: CoolifyServersService
 
   ) {}
 
@@ -221,6 +224,7 @@ export class CicdService {
 
     const deployProfile = normalizeDeployProfile(target?.deployProfile);
 
+    let expectedCommitSha: string | undefined;
     if (target?.repo && !isSourceBuildProfile(deployProfile)) {
       const branch = dto.ref?.trim() || target.branch;
       const readiness = await this.ecrCiReadiness.check(tenantId, target.repo, branch);
@@ -229,6 +233,9 @@ export class CicdService {
           { message: readiness.message, ci: readiness },
           HttpStatus.CONFLICT
         );
+      }
+      if (readiness.state === "ready") {
+        expectedCommitSha = readiness.commitSha;
       }
     }
 
@@ -244,20 +251,54 @@ export class CicdService {
 
     // Pre-deploy guard: self-heal the external `coolify` network on the target
     // server (both staging & prod) so a pruned network doesn't fail the deploy.
-    if (target?.coolifyServerUuid) {
-      await this.prodPostDeploy.ensureCoolifyNetwork(tenantId, target.coolifyServerUuid);
+    try {
+      if (target?.coolifyServerUuid) {
+        await this.prodPostDeploy.ensureCoolifyNetwork(tenantId, target.coolifyServerUuid);
+        await this.coolifyServers.ensureReadyForDeploy(
+          target.coolifyServerUuid,
+          tenantId
+        );
+      }
+
+      // Pre-deploy guard: if the compose pulls an ECR image, log the server in to
+      // that registry first (only when the server's own AWS account owns the
+      // registry — cross-account prod pulls are left untouched). Prevents
+      // "no basic auth credentials" on `docker compose up`.
+      if (target?.coolifyServerUuid && target.coolifyAppUuid) {
+        await this.prodPostDeploy.ensureEcrLogin(
+          tenantId,
+          target.coolifyServerUuid,
+          target.coolifyAppUuid
+        );
+      }
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Pre-deploy checks failed for ${dto.project}/${dto.environment}: ${detail}`);
+      throw new HttpException(
+        {
+          message: "Deploy did not start — pre-flight checks failed.",
+          detail,
+        },
+        HttpStatus.BAD_GATEWAY
+      );
     }
 
-    // Pre-deploy guard: if the compose pulls an ECR image, log the server in to
-    // that registry first (only when the server's own AWS account owns the
-    // registry — cross-account prod pulls are left untouched). Prevents
-    // "no basic auth credentials" on `docker compose up`.
-    if (target?.coolifyServerUuid && target.coolifyAppUuid) {
-      await this.prodPostDeploy.ensureEcrLogin(
-        tenantId,
-        target.coolifyServerUuid,
-        target.coolifyAppUuid
-      );
+    if (
+      dto.environment === "production" &&
+      target?.coolifyServerUuid &&
+      target.coolifyAppUuid
+    ) {
+      const mongoVol = resolveProfileOptions(target.deployProfileOptions).mongoDataVolume;
+      if (mongoVol?.trim()) {
+        const composeDir = `/data/coolify/applications/${target.coolifyAppUuid}`;
+        await this.prodPostDeploy.ensureProdMongoVolumePin(
+          tenantId,
+          target.coolifyServerUuid,
+          composeDir,
+          mongoVol
+        );
+      }
     }
 
     if (target && isSourceBuildProfile(deployProfile)) {
@@ -330,6 +371,7 @@ export class CicdService {
         tag,
         actor,
         driver: "ecr-release",
+        commitSha: expectedCommitSha,
       });
 
       this.logger.log(
@@ -435,6 +477,8 @@ export class CicdService {
 
         driver: "coolify",
 
+        commitSha: expectedCommitSha,
+
       });
 
 
@@ -465,7 +509,13 @@ export class CicdService {
 
       this.logger.error(`Deploy call failed: ${(err as Error).message}`);
 
-      throw new HttpException("Unable to reach deploy target", HttpStatus.BAD_GATEWAY);
+      throw new HttpException(
+        {
+          message: "Deploy did not start — could not reach the deploy target.",
+          detail: (err as Error).message,
+        },
+        HttpStatus.BAD_GATEWAY
+      );
 
     }
 
@@ -513,21 +563,32 @@ export class CicdService {
 
     const commitSha = (payload.commit as string) ?? undefined;
 
-    await this.deployRuns.updateStatus(deploymentId, status, {
-
-      commitSha,
-
-      errorMessage: status === "failed" ? String(payload.message ?? event) : undefined,
-
-    });
-
-
-
     if (status === "success" || status === "failed") {
-
-      await this.finalizeServiceEnv(run.tenantId, run.serviceId, run.environment, status, run.tag, commitSha);
-
+      const gated = await this.applyPostDeployGate(
+        run.tenantId,
+        run.serviceId,
+        run.environment,
+        status,
+        run.commitSha ?? commitSha
+      );
+      await this.deployRuns.updateStatus(deploymentId, gated.outcome, {
+        commitSha,
+        errorMessage:
+          gated.errorMessage ??
+          (gated.outcome === "failed" ? String(payload.message ?? event) : undefined),
+      });
+      await this.finalizeServiceEnv(
+        run.tenantId,
+        run.serviceId,
+        run.environment,
+        gated.outcome,
+        run.tag,
+        commitSha
+      );
+      return;
     }
+
+    await this.deployRuns.updateStatus(deploymentId, status, { commitSha });
 
   }
 
@@ -731,53 +792,47 @@ export class CicdService {
 
         }
 
-        const statusUnchanged = current.status === mapped;
+        if (mapped === "success" || mapped === "failed") {
+          const gated = await this.applyPostDeployGate(
+            tenantId,
+            serviceId,
+            environment,
+            mapped,
+            current.commitSha ?? body.commit ?? undefined
+          );
+          const finalError =
+            gated.errorMessage ??
+            errorHint ??
+            (gated.outcome === "failed" ? body.status : undefined);
+          const statusUnchanged = current.status === gated.outcome;
+          const errorUnchanged = !finalError || current.errorMessage === finalError;
+          if (statusUnchanged && errorUnchanged) return;
 
-        const errorUnchanged = !errorHint || current.errorMessage === errorHint;
-
-        if (statusUnchanged && errorUnchanged) {
-
-          if (mapped === "success" || mapped === "failed") return;
-
-          setTimeout(() => void tick(), intervalMs);
-
+          await this.deployRuns.updateStatus(deploymentId, gated.outcome, {
+            commitSha: body.commit,
+            errorMessage: finalError,
+          });
+          await this.finalizeServiceEnv(
+            tenantId,
+            serviceId,
+            environment,
+            gated.outcome,
+            tag,
+            body.commit
+          );
           return;
-
         }
 
-
+        const statusUnchanged = current.status === mapped;
+        if (statusUnchanged) {
+          setTimeout(() => void tick(), intervalMs);
+          return;
+        }
 
         await this.deployRuns.updateStatus(deploymentId, mapped, {
-
           commitSha: body.commit,
-
-          errorMessage: errorHint ?? (mapped === "failed" ? body.status : undefined),
-
+          errorMessage: errorHint,
         });
-
-
-
-        if (mapped === "success" || mapped === "failed") {
-
-          await this.finalizeServiceEnv(
-
-            tenantId,
-
-            serviceId,
-
-            environment,
-
-            mapped,
-
-            tag,
-
-            body.commit
-
-          );
-
-          return;
-
-        }
 
       } catch (err) {
 
@@ -856,28 +911,24 @@ export class CicdService {
 
         }
 
-        await this.deployRuns.updateStatus(deploymentId, poll.status, {
-
-          commitSha: poll.commitSha,
-
-          errorMessage: poll.errorMessage,
-
-        });
-
-        await this.finalizeServiceEnv(
-
+        const gated = await this.applyPostDeployGate(
           tenantId,
-
           serviceId,
-
           environment,
-
           poll.status,
-
-          tag,
-
           poll.commitSha
-
+        );
+        await this.deployRuns.updateStatus(deploymentId, gated.outcome, {
+          commitSha: poll.commitSha,
+          errorMessage: gated.errorMessage ?? poll.errorMessage,
+        });
+        await this.finalizeServiceEnv(
+          tenantId,
+          serviceId,
+          environment,
+          gated.outcome,
+          tag,
+          poll.commitSha
         );
 
       } catch (err) {
@@ -897,6 +948,24 @@ export class CicdService {
   }
 
 
+
+  private async applyPostDeployGate(
+    tenantId: string,
+    serviceId: string | null,
+    environment: "staging" | "production",
+    outcome: "success" | "failed",
+    expectedCommitSha?: string
+  ): Promise<{ outcome: "success" | "failed"; errorMessage?: string }> {
+    if (outcome !== "success" || !serviceId) return { outcome };
+    const post = await this.prodPostDeploy.afterCoolifySuccess(
+      tenantId,
+      serviceId,
+      environment,
+      { expectedCommitSha: expectedCommitSha?.trim() || undefined }
+    );
+    if (post.ok) return { outcome: "success" };
+    return { outcome: "failed", errorMessage: post.error };
+  }
 
   private async finalizeServiceEnv(
 
@@ -925,10 +994,6 @@ export class CicdService {
       commitSha,
 
     });
-
-    if (outcome === "success") {
-      await this.prodPostDeploy.afterCoolifySuccess(tenantId, serviceId, environment);
-    }
 
   }
 

@@ -83,11 +83,18 @@ export class EcrReleaseService {
           ecrRegion,
           ecrImageTag,
           commitShort: shortSha,
+          commitSha,
         });
         built = true;
       } else if (await this.canBuildLocally()) {
         // Local dev convenience when Bubblbook repo + Docker socket are mounted into the API container.
-        await this.buildAndPushLocal({ ecrRepository, ecrRegion, ecrImageTag, commitShort: shortSha });
+        await this.buildAndPushLocal({
+          ecrRepository,
+          ecrRegion,
+          ecrImageTag,
+          commitShort: shortSha,
+          commitSha,
+        });
         built = true;
       } else {
         throw new HttpException(
@@ -133,6 +140,7 @@ export class EcrReleaseService {
     ecrRegion: string;
     ecrImageTag: string;
     commitShort: string;
+    commitSha: string;
   }): Promise<void> {
     const mount = this.config.get<string>("BUBBLBOOK_REPO_MOUNT") ?? "/bubblbook-src";
     const localTag = `praxarch-ecr-build:${input.ecrImageTag}`;
@@ -140,7 +148,16 @@ export class EcrReleaseService {
 
     await execFileAsync(
       "docker",
-      ["build", "-t", localTag, "-f", "Dockerfile", mount],
+      [
+        "build",
+        "--build-arg",
+        `BUILD_COMMIT=${input.commitSha}`,
+        "-t",
+        localTag,
+        "-f",
+        "Dockerfile",
+        mount,
+      ],
       { timeout: 45 * 60_000, maxBuffer: 16 * 1024 * 1024 }
     );
 
@@ -189,6 +206,7 @@ export class EcrReleaseService {
     ecrRegion: string;
     ecrImageTag: string;
     commitShort: string;
+    commitSha: string;
   }): Promise<void> {
     const stagingTarget = await this.deployTargets.get(input.tenantId, input.serviceId, "staging");
     const composeDir =
@@ -206,7 +224,7 @@ export class EcrReleaseService {
       "sudo docker image prune -f 2>&1 | tail -2 || true",
       `git fetch origin && git checkout "${input.branch}" && git pull --ff-only origin "${input.branch}"`,
       "export DOCKER_BUILDKIT=1",
-      `sudo -E docker build -t ${localTag} -f Dockerfile .`,
+      `sudo -E docker build --build-arg BUILD_COMMIT=${input.commitSha} -t ${localTag} -f Dockerfile .`,
       `aws ecr get-login-password --region ${input.ecrRegion} | sudo docker login --username AWS --password-stdin ${input.ecrRepository.split("/")[0]}`,
       `sudo docker tag ${localTag} ${input.ecrRepository}:${input.ecrImageTag}`,
       `sudo docker tag ${localTag} ${input.ecrRepository}:${input.commitShort}`,

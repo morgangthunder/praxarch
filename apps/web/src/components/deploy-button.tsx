@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { AgentStatus } from "@/lib/types";
+import { parseApiError } from "@/lib/parse-api-error";
 
 type DeployState = "idle" | "deploying" | "success" | "error";
 
@@ -39,8 +40,15 @@ export function DeployButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project, environment }),
       });
-      if (!res.ok) throw new Error(`Deploy rejected (${res.status})`);
-      const data = (await res.json()) as { deploymentId: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        deploymentId?: string;
+      };
+      if (!res.ok) {
+        throw new Error(parseApiError(data, `Deploy did not start (${res.status})`));
+      }
+      if (!data.deploymentId) {
+        throw new Error("Deploy did not start — no deployment id returned.");
+      }
       setState("success");
       setMessage(`Triggered · ${data.deploymentId}`);
     } catch (err) {
@@ -52,7 +60,11 @@ export function DeployButton({
   return (
     <div className="flex items-center gap-2.5">
       {state !== "idle" && (
-        <span className="flex items-center gap-1.5 text-xs text-content-muted">
+        <span
+          className={`flex items-center gap-1.5 text-xs ${
+            state === "error" ? "text-status-error" : "text-content-muted"
+          }`}
+        >
           <StatusDot status={STATE_TO_STATUS[state]} />
           {message}
         </span>

@@ -13,14 +13,15 @@ export interface DeployRunSnapshot {
   environment: "staging" | "production";
 }
 
-const STATUS_LABEL: Record<DeployRunStatus, string> = {
-  queued: "Queued",
-  building: "Building…",
-  success: "Deployed",
-  failed: "Failed",
-};
-
 const TERMINAL: DeployRunStatus[] = ["success", "failed"];
+
+function deployStatusLabel(run: DeployRunSnapshot): string {
+  const env = run.environment === "production" ? "Production" : "Staging";
+  if (run.status === "success") return `${env} deployed`;
+  if (run.status === "failed") return `${env} deploy failed`;
+  if (run.status === "building") return `${env} building…`;
+  return `${env} queued`;
+}
 
 function applyRun(
   setRun: (r: DeployRunSnapshot) => void,
@@ -104,7 +105,7 @@ export function useDeployStream(
   const label = run
     ? run.status === "failed" && run.errorMessage
       ? run.errorMessage
-      : STATUS_LABEL[run.status]
+      : deployStatusLabel(run)
     : "";
   return { run, label, done };
 }

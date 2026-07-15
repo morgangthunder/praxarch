@@ -17,16 +17,29 @@ export async function POST(req: NextRequest) {
   const sessionToken = req.cookies.get("praxarch_session")?.value;
   const tenant = req.headers.get("x-praxarch-tenant");
 
-  const res = await fetch(`${apiBase}/cicd/deploy`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-      ...(tenant ? { "x-praxarch-tenant": tenant } : {}),
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase}/cicd/deploy`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        ...(tenant ? { "x-praxarch-tenant": tenant } : {}),
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      {
+        message:
+          "Deploy did not start — Praxarch could not reach the API. Is the API container running?",
+        detail,
+      },
+      { status: 502 }
+    );
+  }
 
   const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.status });

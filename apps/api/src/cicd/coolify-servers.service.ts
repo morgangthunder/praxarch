@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { CoolifyApiClient, type CoolifyServer } from "./coolify-api.client";
 import type { CreateCoolifyServerDto } from "./dto/create-coolify-server.dto";
 import { assertValidSshPrivateKey, coolifyErrorMessage } from "./ssh-key.util";
@@ -111,6 +111,52 @@ export class CoolifyServersService {
       platform: raw.name === "localhost",
       validated: flags.usable && flags.reachable,
     };
+  }
+
+  /** Quick pre-deploy check: re-validate if Coolify marks the server unreachable. */
+  async ensureReadyForDeploy(
+    uuid: string,
+    tenantId: string,
+    timeoutMs = 90_000
+  ): Promise<void> {
+    const isReady = async (): Promise<boolean> => {
+      const raw = await this.coolify.getServer(uuid);
+      if (!this.isVisibleToTenant(raw, tenantId)) {
+        throw new NotFoundException("Server not found for this tenant");
+      }
+      const flags = serverFlags(raw);
+      return flags.reachable && flags.usable;
+    };
+
+    if (await isReady()) return;
+
+    this.logger.warn(`Coolify server ${uuid} not ready — triggering validation before deploy`);
+    try {
+      await this.coolify.validateServer(uuid);
+    } catch (err) {
+      this.logger.warn(
+        `Coolify validate trigger for ${uuid} returned an error — continuing to poll`,
+        err instanceof Error ? err.message : err
+      );
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      if (await isReady()) {
+        this.logger.log(`Coolify server ${uuid} ready for deploy after validation`);
+        return;
+      }
+    }
+
+    throw new HttpException(
+      {
+        message:
+          "Coolify reports the deploy server is not ready (SSH/Docker health check failed). " +
+          "Wait a minute and try again, or open Coolify → Servers → Validate for the staging server.",
+      },
+      HttpStatus.CONFLICT
+    );
   }
 
   /** Trigger Coolify validation and poll until reachable or timeout. Never mutates the remote host. */

@@ -1,5 +1,5 @@
 // Surfaced on every boot so you can confirm the running build (per project convention).
-const WEB_VERSION = "0.16.31";
+const WEB_VERSION = "0.16.38";
 console.log(`🟣 Praxarch Web v${WEB_VERSION} — API: ${process.env.API_BASE_URL ?? "http://localhost:3901"}`);
 
 /** @type {import('next').NextConfig} */

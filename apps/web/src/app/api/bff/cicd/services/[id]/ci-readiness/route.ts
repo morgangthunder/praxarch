@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readJsonResponse } from "@/lib/safe-json";
 
 const apiBase = () => process.env.API_BASE_URL;
 
@@ -25,10 +26,26 @@ export async function GET(
   const qs = new URLSearchParams({ environment });
   if (ref) qs.set("ref", ref);
 
-  const res = await fetch(`${base}/cicd/services/${encodeURIComponent(id)}/ci-readiness?${qs}`, {
-    headers: { ...tenantHeader(req) },
-    cache: "no-store",
-  });
-  const data = await res.json().catch(() => ({}));
-  return NextResponse.json(data, { status: res.status });
+  try {
+    const res = await fetch(`${base}/cicd/services/${encodeURIComponent(id)}/ci-readiness?${qs}`, {
+      headers: { ...tenantHeader(req) },
+      cache: "no-store",
+      signal: AbortSignal.timeout(45_000),
+    });
+    const data = (await readJsonResponse(res)) ?? {
+      state: "blocked",
+      reason: "check_failed",
+      message: "CI readiness check returned an empty response. Try again in a moment.",
+    };
+    return NextResponse.json(data, { status: res.ok ? res.status : res.status || 502 });
+  } catch (err) {
+    const message =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "CI readiness check timed out. GitHub may be slow — try again in a moment."
+        : "Could not reach the deploy API for CI status. Try refreshing.";
+    return NextResponse.json(
+      { state: "blocked", reason: "check_failed", message },
+      { status: 503 }
+    );
+  }
 }

@@ -7,9 +7,13 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useWorkspace } from "@/components/workspace-context";
 import { useDeployStream, type DeployRunStatus } from "@/lib/use-deploy-stream";
-import { fetchCiReadiness, type CiReadiness } from "@/lib/ci-readiness";
+import { fetchCiReadiness, ciAllowsDeploy, ciGateLabel, type CiGate } from "@/lib/ci-readiness";
+import { isPromoteAvailable, productionStatusHint } from "@/lib/promote-availability";
+import { emitDeployFinished } from "@/lib/deploy-events";
+import { invalidateClientCache } from "@/lib/client-api";
 import type { AgentStatus, DeployEnvironment, DeployService, ServiceEnvironment } from "@/lib/types";
 import { formatDeployTimestamp } from "@/lib/utils";
+import { parseApiError } from "@/lib/parse-api-error";
 
 type ActionState = { kind: "idle" | "busy" | "done" | "error" | "requested"; msg?: string };
 
@@ -19,19 +23,8 @@ function runStatusToAgent(status: DeployRunStatus): AgentStatus {
   return "pending";
 }
 
-function ciBlocksDeploy(ci: CiReadiness | null): boolean {
-  return (
-    ci?.state === "blocked" &&
-    (ci.reason === "in_progress" || ci.reason === "not_started" || ci.reason === "failed")
-  );
-}
-
-function ciLabel(ci: CiReadiness): string {
-  const msg = (ci.message ?? "").replace(/\*\*/g, "");
-  if (ci.reason === "in_progress") return `CI building… ${msg}`;
-  if (ci.reason === "not_started") return `CI not ready — ${msg}`;
-  if (ci.reason === "failed") return `CI failed — ${msg}`;
-  return msg;
+function ciBlocksDeploy(gate: CiGate): boolean {
+  return !ciAllowsDeploy(gate);
 }
 
 /**
@@ -55,8 +48,8 @@ export function ServiceCard({
   const [deploymentId, setDeploymentId] = useState<string | null>(null);
   const [activeEnv, setActiveEnv] = useState<DeployEnvironment | null>(null);
   const [localService, setLocalService] = useState(service);
-  const [ciStaging, setCiStaging] = useState<CiReadiness | null>(null);
-  const [ciProduction, setCiProduction] = useState<CiReadiness | null>(null);
+  const [ciStaging, setCiStaging] = useState<CiGate>("loading");
+  const [ciProduction, setCiProduction] = useState<CiGate>("loading");
 
   const { run, label, done } = useDeployStream(deploymentId, tenantSlug);
   const finalizedRunId = useRef<string | null>(null);
@@ -79,12 +72,18 @@ export function ServiceCard({
           fetchCiReadiness(tenantSlug, localService.id, "production"),
         ]);
         if (cancelled) return;
-        setCiStaging(stagingCi.state === "blocked" ? stagingCi : null);
-        setCiProduction(prodCi.state === "blocked" ? prodCi : null);
+        setCiStaging(stagingCi);
+        setCiProduction(prodCi);
       } catch {
         if (!cancelled) {
-          setCiStaging(null);
-          setCiProduction(null);
+          const failed: CiGate = {
+            state: "blocked",
+            reason: "check_failed",
+            message:
+              "Could not verify CI build status with GitHub. Deploy is paused until the check succeeds.",
+          };
+          setCiStaging(failed);
+          setCiProduction(failed);
         }
       }
     }
@@ -99,7 +98,7 @@ export function ServiceCard({
 
   const prod = localService.environments.find((e) => e.environment === "production");
   const staging = localService.environments.find((e) => e.environment === "staging");
-  const promoteAvailable = Boolean(staging?.aheadOfProd);
+  const promoteAvailable = isPromoteAvailable(staging, prod);
 
   const displayEnvironments = useMemo(() => {
     if (!run || !activeEnv) return localService.environments;
@@ -144,19 +143,31 @@ export function ServiceCard({
         }
         return e;
       });
-      const updated = { ...prev, environments: updatedEnvs };
+      const stagingEnv = updatedEnvs.find((e) => e.environment === "staging");
+      const prodEnv = updatedEnvs.find((e) => e.environment === "production");
+      const finalEnvs = updatedEnvs.map((e) =>
+        e.environment === "staging"
+          ? { ...e, aheadOfProd: isPromoteAvailable(stagingEnv, prodEnv) || undefined }
+          : e
+      );
+      const updated = { ...prev, environments: finalEnvs };
       onServiceUpdate?.(updated);
       return updated;
     });
 
     if (run.status === "success") {
-      setState({ kind: "done", msg: `Deployed · ${run.id}` });
+      const envLabel = activeEnv === "production" ? "Production" : "Staging";
+      setState({ kind: "done", msg: `${envLabel} deployed` });
     } else if (run.status === "failed") {
-      setState({ kind: "error", msg: run.errorMessage ?? "Deploy failed" });
+      const envLabel = activeEnv === "production" ? "Production" : "Staging";
+      setState({ kind: "error", msg: run.errorMessage ?? `${envLabel} deploy failed` });
     }
+    invalidateClientCache(tenantSlug, "/api/bff/cicd/deploy-runs");
+    invalidateClientCache(tenantSlug, "/api/bff/cicd/services");
+    emitDeployFinished(tenantSlug);
     setDeploymentId(null);
     setActiveEnv(null);
-  }, [done, run, activeEnv, onServiceUpdate]);
+  }, [done, run, activeEnv, onServiceUpdate, tenantSlug]);
 
   async function deploy(environment: DeployEnvironment, ref?: string) {
     const ciGate =
@@ -166,7 +177,7 @@ export function ServiceCard({
           ? ciStaging
           : ciProduction;
     if (ciBlocksDeploy(ciGate)) {
-      setState({ kind: "error", msg: ciLabel(ciGate!) });
+      setState({ kind: "error", msg: ciGateLabel(ciGate) });
       return;
     }
 
@@ -191,13 +202,21 @@ export function ServiceCard({
         message?: string;
       };
       if (!res.ok) {
-        throw new Error(data.message ?? `Rejected (${res.status})`);
+        throw new Error(
+          parseApiError(data, `Deploy did not start (${res.status})`)
+        );
       }
-      setDeploymentId(data.deploymentId!);
+      if (!data.deploymentId) {
+        throw new Error("Deploy did not start — no deployment id returned.");
+      }
+      setDeploymentId(data.deploymentId);
       setState({ kind: "busy", msg: "Starting…" });
     } catch (err) {
       setActiveEnv(null);
-      setState({ kind: "error", msg: err instanceof Error ? err.message : "Failed" });
+      setState({
+        kind: "error",
+        msg: err instanceof Error ? err.message : "Deploy did not start",
+      });
     }
   }
 
@@ -265,18 +284,22 @@ export function ServiceCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
-          {(ciBlocksDeploy(ciStaging) || ciBlocksDeploy(ciProduction)) && (
+          {state.kind === "error" && state.msg && (
+            <p className="w-full rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-xs text-status-error">
+              {state.msg}
+            </p>
+          )}
+
+          {(ciBlocksDeploy(ciStaging) || ciBlocksDeploy(ciProduction)) && (() => {
+            const blockingGate = ciBlocksDeploy(ciStaging) ? ciStaging : ciProduction;
+            return (
             <p className="w-full rounded-lg border border-status-pending/30 bg-status-pending/10 px-3 py-2 text-xs text-status-pending">
-              {ciBlocksDeploy(ciStaging) && ciStaging
-                ? ciLabel(ciStaging)
-                : ciProduction
-                  ? ciLabel(ciProduction)
-                  : ""}
-              {ciStaging?.runUrl || ciProduction?.runUrl ? (
+              {ciGateLabel(blockingGate)}
+              {blockingGate !== "loading" && blockingGate.runUrl ? (
                 <>
                   {" "}
                   <a
-                    href={(ciStaging?.runUrl ?? ciProduction?.runUrl)!}
+                    href={blockingGate.runUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="underline underline-offset-2"
@@ -286,7 +309,8 @@ export function ServiceCard({
                 </>
               ) : null}
             </p>
-          )}
+            );
+          })()}
 
           {can("deploy") && staging && (
             <Button
@@ -294,7 +318,7 @@ export function ServiceCard({
               size="sm"
               onClick={() => deploy("staging")}
               disabled={state.kind === "busy" || ciBlocksDeploy(ciStaging)}
-              title={ciStaging ? ciLabel(ciStaging) : undefined}
+              title={ciBlocksDeploy(ciStaging) ? ciGateLabel(ciStaging) : undefined}
             >
               Deploy staging
             </Button>
@@ -306,7 +330,7 @@ export function ServiceCard({
               size="sm"
               onClick={() => deploy("production", prodRow.branch)}
               disabled={state.kind === "busy" || ciBlocksDeploy(ciProduction)}
-              title={ciProduction ? ciLabel(ciProduction) : undefined}
+              title={ciBlocksDeploy(ciProduction) ? ciGateLabel(ciProduction) : undefined}
             >
               Deploy production
             </Button>
@@ -319,9 +343,9 @@ export function ServiceCard({
                 size="sm"
                 onClick={() => deploy("production", stagingRow?.branch)}
                 disabled={state.kind === "busy" || ciBlocksDeploy(ciStaging)}
-                title={ciStaging ? ciLabel(ciStaging) : undefined}
+                title={ciBlocksDeploy(ciStaging) ? ciGateLabel(ciStaging) : undefined}
               >
-                Promote → production
+                Promote Staging to Production
               </Button>
             ) : can("deploy") ? (
               <Button
@@ -335,11 +359,19 @@ export function ServiceCard({
               </Button>
             ) : null
           ) : (
-            <span className="text-xs text-content-muted">Production is up to date.</span>
+            <span
+              className={`text-xs ${prodRow?.status === "error" ? "text-status-error" : "text-content-muted"}`}
+            >
+              {productionStatusHint(stagingRow, prodRow)}
+            </span>
           )}
 
           {state.kind !== "idle" && (
-            <span className="ml-auto flex items-center gap-1.5 text-xs text-content-muted">
+            <span
+              className={`ml-auto flex items-center gap-1.5 text-xs ${
+                state.kind === "error" ? "text-status-error" : "text-content-muted"
+              }`}
+            >
               <StatusDot
                 status={
                   run

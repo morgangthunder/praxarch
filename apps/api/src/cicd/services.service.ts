@@ -55,6 +55,29 @@ function defaultServices(tenant: string): DeployServiceRecord[] {
   ];
 }
 
+/** Whether staging should offer promote-to-production (commit drift or prod broken). */
+export function recomputeAheadOfProd(environments: ServiceEnvironment[]): ServiceEnvironment[] {
+  const staging = environments.find((e) => e.environment === "staging");
+  const prod = environments.find((e) => e.environment === "production");
+  if (!staging || !prod) return environments;
+
+  const stagingCommit = normalizeCommit(staging.commit);
+  const prodCommit = normalizeCommit(prod.commit);
+  const ahead =
+    prod.status === "error" ||
+    (stagingCommit != null && prodCommit != null && stagingCommit !== prodCommit);
+
+  return environments.map((e) =>
+    e.environment === "staging" ? { ...e, aheadOfProd: ahead || undefined } : e
+  );
+}
+
+function normalizeCommit(commit: string | undefined): string | null {
+  const c = (commit ?? "").trim().toLowerCase();
+  if (!c || c === "—" || c === "head") return null;
+  return c.replace(/[^a-f0-9]/g, "").slice(0, 7) || null;
+}
+
 @Injectable()
 export class ServicesService {
   private readonly logger = new Logger(ServicesService.name);
@@ -167,16 +190,18 @@ export class ServicesService {
         version,
         commit,
         deployedAt,
-        aheadOfProd: environment === "staging" ? true : undefined,
+        ...(environment === "staging" && outcome.status === "active" ? { aheadOfProd: true } : {}),
       };
     });
 
-    if (environment === "production") {
+    if (environment === "production" && outcome.status === "active") {
       environments = environments.map((e) => {
         if (e.environment === "staging") return { ...e, aheadOfProd: false };
         return e;
       });
     }
+
+    environments = recomputeAheadOfProd(environments);
 
     await this.db.query(
       `UPDATE public.deploy_services SET environments = $3
@@ -196,6 +221,12 @@ export class ServicesService {
   }
 
   private toRecord(r: ServiceRow): DeployServiceRecord {
-    return { id: r.id, name: r.name, repo: r.repo, kind: r.kind, environments: r.environments };
+    return {
+      id: r.id,
+      name: r.name,
+      repo: r.repo,
+      kind: r.kind,
+      environments: recomputeAheadOfProd(r.environments),
+    };
   }
 }

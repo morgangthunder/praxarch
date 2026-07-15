@@ -89,7 +89,8 @@ services:
       REDIS_URL: redis://redis:6379
       N8N_BASE_URL: http://n8n:5678
       # Phase secrets — override in a real .env (never commit).
-      COOLIFY_API_URL: ${COOLIFY_API_URL:-}
+      # From inside the API container, Coolify on the host is host.docker.internal — not 127.0.0.1.
+      COOLIFY_API_URL: ${COOLIFY_API_URL:-http://host.docker.internal:8000}
       COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN:-}
       COOLIFY_WEBHOOK_SECRET: ${COOLIFY_WEBHOOK_SECRET:-}
       # Deploy driver: 'simulate' (default when Coolify unset) or 'coolify'.
@@ -134,6 +135,7 @@ services:
       target: dev
     container_name: praxarch-web
     restart: unless-stopped
+    command: ["npm", "run", "dev"]
     environment:
       NODE_ENV: development
       # BFF → API over the internal docker network (server-side only).
